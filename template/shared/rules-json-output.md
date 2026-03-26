@@ -1,0 +1,5 @@
+- tags: 3-8 lowercase specific keywords (not generic terms)
+- quality: "high" = dense technical info, specific requirements/configs; "medium" = useful overview; "low" = marketing fluff or very superficial
+- key_facts: 2-5 concrete facts, numbers, or specific technical details from the document
+- summary: focus on WHAT you can learn from this document, not what it "discusses"
+- Return ONLY valid JSON. No markdown fences, no preamble.

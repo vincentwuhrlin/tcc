@@ -1,0 +1,83 @@
+
+MEDIA_DIR=../media                 # source PDFs, videos, output .md
+CONTEXT_DIR=../context             # prompt templates, domain config
+PROJECTS_DIR=../projects           # Claude Projects export output
+
+
+
+Il y avavait les variables d'env TAG_* => a renommer en rapport avec la commande, example MEDIA_DISCOVER_* si ça ne concernant que le discover
+Pour les variables SPLIT, IDEM, utiliser MEDIA_SPLIT*
+Les fichiers commun dans src/commands, type llm, à mettre dans src/commands/common (pour n'avoir que les vrai commandes dans commands)
+prompt-classify.md et prompt-discover.md ont a priori les mêmes Rules, on factorise ?
+Est ce que dans context on met des repertoires types classify / discover / synthetize / autre ? pour un peu mieux organise
+
+
+
+
+
+Les docs les plus commplets sont à priori "Industrial Edge Platform Operation*"
+
+CODE SOURCE:
+https://github.com/industrial-edge
+
+DISCOVERY.md = le blackboard brut, par document (résumé, topics, tags, category suggérée)
+SUMMARY.md = le tableau synthétique (1 ligne par doc) + analyse des fréquences + gaps identifiés
+plan.md = le plan propre et éditable, prêt pour la classification
+
+
+C'est le vrai sujet. Le projet Claude.ai accepte environ 200k tokens de "Project Knowledge",
+soit grosso modo 500-600 pages de texte. Si ta base dépasse ça, tu as trois options sans passer au RAG
+
+La première, c'est le tri par quality. C'est exactement pour ça qu'on a le champ quality dans le tagging.
+Tu ne charges que les docs high et medium dans le projet, et tu ignores les low. Ça peut diviser ton volume par 2-3.
+
+La deuxième, c'est les projets multiples. Un projet par section du plan : "IE-Platform", "IE-Applications",
+ "IE-Prerequisites". Tu poses tes questions dans le bon projet. C'est un peu comme des dossiers thématiques.
+
+La troisième, c'est charger les INDEX.md + SUMMARY.md + plan.md comme base permanente,
+ et ajouter les docs spécifiques à la conversation au moment où tu en as besoin.
+ Claude connaît la carte, et tu lui donnes le territoire au cas par cas.
+
+ 3. Est-ce que Claude lit vraiment tout le project knowledge ?
+ Tu touches un point important. Claude a accès à tout le project knowledge dans sa fenêtre de contexte,
+ mais son attention n'est pas uniforme. C'est un phénomène connu : sur de très longs contextes, les LLMs o
+ nt tendance à mieux retenir le début et la fin du contexte que le milieu (c'est le "lost in the middle" problem).
+ Et en pratique, si tu poses une question sur un détail enfoui dans le 47ème document, Claude peut le rater —
+ pas parce qu'il ne l'a pas "lu", mais parce que l'attention est diluée.
+
+ C'est justement là que ton frontmatter YAML devient précieux. Voici une stratégie concrète pour t'assurer que
+  Claude exploite bien ta base :
+
+Tu mets INDEX.md en premier dans le project knowledge (les premiers documents reçoivent plus d'attention).
+ Comme il contient les résumés, tags et catégories de chaque doc, Claude sait ce qui existe.
+  Ensuite, quand tu poses une question, tu peux commencer par :
+   "D'après l'INDEX.md, quels documents sont pertinents pour répondre à [ma question] ?
+   Liste-les, puis synthétise leurs contenus." Ça force Claude à d'abord scanner l'index,
+   identifier les docs pertinents, puis aller chercher l'info dans ces docs spécifiques.
+    C'est une sorte de "RAG manuel" dans le projet.
+
+
+L'autre approche : tu crées un system prompt de projet du genre :
+
+"Tu as accès à une base documentaire sur Siemens Industrial Edge.
+Chaque document a un frontmatter YAML avec title, categories, tags, summary, et key_facts.
+TOUJOURS commencer par identifier les documents pertinents via leurs métadonnées avant de répondre.
+Citer les sources (nom de fichier)."
+
+Ça structure l'attention de Claude et réduit le "lost in the middle".
+En résumé, pour ton cas immédiat : projet Claude.ai avec tri quality + INDEX.md en premier + system prompt structurant.
+Si la base grossit au-delà de 200k tokens, projets multiples par thème
+ Et le RAG sur RunPod seulement si tu arrives à un volume où même les projets multiples ne suffisent plus,
+ ou si toute l'équipe KTSO doit pouvoir interroger la base.
+
+Ma recommandation pour toi : garde le repo GitHub comme source de vérité. Ajoute une commande tag:export pour trier les .md par catégorie dans des dossiers. Et crée les projets Claude.ai manuellement — tu le fais une fois, et ensuite tu re-dragues les dossiers quand la base évolue. C'est 2 minutes de travail.
+Tu veux que j'ajoute cette commande tag:export au toolkit ?
+
+Exactement — et c'est pour ça que le pipeline a un ordre naturel. L'export est simplement l'étape 4, après que tout le reste a tourné :
+discover → synthesize → classify → export
+   1            2           3         4
+
+
+
+
+
