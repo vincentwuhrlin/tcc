@@ -7,7 +7,7 @@ import { validateKeyPair, sshFlags } from "../ssh.js";
 import { checkSetup } from "../preflight.js";
 import * as state from "../state.js";
 
-const SETUP_SCRIPT = resolve(process.cwd(), "setup.sh");
+const SETUP_SCRIPT = resolve(process.cwd(), "scripts/setup-transcript.sh");
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -74,7 +74,12 @@ export async function create(): Promise<void> {
 
   // ── Guard: remote duplicate by name ────────────────────────────────
   console.log(`🔍 Checking for existing "${GPU_RUNPOD_POD_NAME}" pod...`);
-  const existing = await getPods();
+  let existing: Awaited<ReturnType<typeof getPods>> = [];
+  try {
+    existing = await getPods();
+  } catch {
+    // API may return empty body when no pods exist — safe to continue
+  }
   const dup = existing.find(
     (p) => p.name === GPU_RUNPOD_POD_NAME && p.desiredStatus !== "EXITED",
   );

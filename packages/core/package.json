@@ -15,19 +15,24 @@
     "gpu:start": "tsx src/cli.ts start",
     "gpu:stop": "tsx src/cli.ts stop",
     "gpu:terminate": "tsx src/cli.ts terminate",
-
     "media:stats": "tsx src/cli.ts stats",
+    "media:discover": "tsx src/cli.ts discover",
+    "media:discover:force": "tsx src/cli.ts discover --force",
+    "media:synthesize": "tsx src/cli.ts synthesize",
     "media:split": "tsx src/cli.ts split",
     "media:split:dry": "tsx src/cli.ts split --dry-run",
     "media:split:check": "tsx src/cli.ts split:check",
     "media:split:undo": "tsx src/cli.ts split:undo",
-    "media:discover": "tsx src/cli.ts discover",
-    "media:discover:force": "tsx src/cli.ts discover --force",
-    "media:synthesize": "tsx src/cli.ts synthesize",
     "media:classify": "tsx src/cli.ts classify",
     "media:classify:force": "tsx src/cli.ts classify --force",
-    "media:index": "tsx src/cli.ts index",
-    "media:untag": "tsx src/cli.ts untag",
+    "media:classify:check": "tsx src/cli.ts classify:check",
+
+    "media:embed": "tsx src/cli.ts embed",
+    "media:embed:dry": "tsx src/cli.ts embed --dry-run",
+    "media:embed:force": "tsx src/cli.ts embed --force",
+    "media:embed:gpu": "tsx src/cli.ts embed:gpu",
+    "media:embed:gpu:dry": "tsx src/cli.ts embed:gpu --dry-run",
+    "media:embed:gpu:keep": "tsx src/cli.ts embed:gpu --keep",
 
     "bundle": "tsx src/cli.ts export",
     "bundle:dry": "tsx src/cli.ts export --dry-run",
@@ -38,9 +43,12 @@
     "ai": "^4.0.0",
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
+    "@huggingface/transformers": "^3.4.0",
+    "better-sqlite3": "^11.0.0",
     "franc-min": "^6.2.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0"
   }
 }

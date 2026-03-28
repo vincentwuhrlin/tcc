@@ -167,6 +167,18 @@ export const PLAN_FILE = resolvePath(process.env.PLAN_FILE ?? join(OUTPUT_DIR, "
 // ── Split (RAG chunking) ────────────────────────────────────────────
 export const MEDIA_SPLIT_MAX_CHUNK = parseInt(process.env.MEDIA_SPLIT_MAX_CHUNK ?? "6000", 10);
 
+// ── RAG (embedding + vector search) ────────────────────────────────
+// RAG credentials are independent from LLM credentials.
+// Falls back to API_KEY / API_BASE_URL if not set explicitly.
+// This lets you use e.g. personal Anthropic for LLM + corporate UPTIMIZE for embed.
+export type RagEngineType = "nomic-uptimize" | "nomic-local" | "jina-local";
+export const RAG_ENGINE = (process.env.RAG_ENGINE ?? "nomic-uptimize") as RagEngineType;
+export const RAG_API_KEY = process.env.RAG_API_KEY ?? API_KEY;
+export const RAG_API_BASE_URL = process.env.RAG_API_BASE_URL ?? API_BASE_URL;
+export const RAG_BATCH_SIZE = parseInt(process.env.RAG_BATCH_SIZE ?? "10", 10);
+export const RAG_BATCH_CONCURRENCY = parseInt(process.env.RAG_BATCH_CONCURRENCY ?? "5", 10);
+export const RAG_TOP_K = parseInt(process.env.RAG_TOP_K ?? "20", 10);
+
 // ── Projects (Claude Projects export) ───────────────────────────────
 export const BUNDLES_FILE = resolvePath(process.env.BUNDLES_FILE ?? join(BUNDLES_DIR, "bundles.json"));
 export const BUNDLE_MIN_QUALITY = process.env.BUNDLE_MIN_QUALITY ?? "medium";

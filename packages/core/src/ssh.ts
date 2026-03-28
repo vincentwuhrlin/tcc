@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "fs";
+import { platform } from "os";
 import { getGpuConfig } from "./config.js";
 
 export function validateKeyPair(): string {
@@ -21,5 +22,6 @@ export function getPrivateKeyPath(): string {
 }
 
 export function sshFlags(): string {
-  return `-i "${getGpuConfig().sshPrivateKey}" -o StrictHostKeyChecking=no -o ServerAliveInterval=30`;
+  const nullFile = platform() === "win32" ? "NUL" : "/dev/null";
+  return `-i "${getGpuConfig().sshPrivateKey}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=${nullFile} -o ServerAliveInterval=30`;
 }

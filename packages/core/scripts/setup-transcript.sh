@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# setup.sh — Pod setup (GPU tools only, download is done locally)
+# setup-transcript.sh — Pod setup (GPU tools for transcription)
 # =============================================================================
 set -euo pipefail
 START_TIME=$SECONDS

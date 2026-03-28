@@ -16,6 +16,9 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["onnxruntime-node", "better-sqlite3", "sharp"]
+  },
   "dependencies": {},
   "devDependencies": {
     "@types/node": "^25.5.0",

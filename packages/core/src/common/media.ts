@@ -5,8 +5,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import {
-  OUTPUT_DIR, MEDIA_FILE_MODE,
-  MEDIA_SUMMARY_HEAD, MEDIA_SUMMARY_MID, MEDIA_SUMMARY_TAIL, PLAN_FILE,
+  OUTPUT_DIR, PLAN_FILE,
 } from "../config.js";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -93,21 +92,6 @@ export function buildFrontmatter(meta: TagResult, sourceFile: string, dir: strin
     `tagged_at: "${new Date().toISOString()}"`,
     extraFields ? extraFields : null, "---", "",
   ].filter((l) => l !== null).join("\n");
-}
-
-// ── Content preparation ─────────────────────────────────────────────
-
-export function prepareContent(raw: string): string {
-  if (MEDIA_FILE_MODE === "full") return raw;
-  const budget = MEDIA_SUMMARY_HEAD + MEDIA_SUMMARY_MID + MEDIA_SUMMARY_TAIL;
-  if (raw.length <= budget + 300) return raw;
-  const head = raw.slice(0, MEDIA_SUMMARY_HEAD);
-  const midStart = Math.floor((raw.length - MEDIA_SUMMARY_MID) / 2);
-  const mid = raw.slice(midStart, midStart + MEDIA_SUMMARY_MID);
-  const tail = raw.slice(-MEDIA_SUMMARY_TAIL);
-  const gap1 = midStart - MEDIA_SUMMARY_HEAD;
-  const gap2 = raw.length - MEDIA_SUMMARY_TAIL - (midStart + MEDIA_SUMMARY_MID);
-  return [head, `\n\n[... ~${Math.round(gap1 / 4)} tokens skipped ...]\n\n`, mid, `\n\n[... ~${Math.round(gap2 / 4)} tokens skipped ...]\n\n`, tail].join("");
 }
 
 // ── JSON response parsing ───────────────────────────────────────────

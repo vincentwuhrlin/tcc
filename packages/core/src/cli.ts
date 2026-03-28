@@ -20,8 +20,8 @@ import { split, splitCheck, splitUndo } from "./commands/split.js";
 import { discover } from "./commands/discover.js";
 import { synthesize } from "./commands/synthesize.js";
 import { classify } from "./commands/classify.js";
-import { mediaIndex } from "./commands/media-index.js";
-import { untag } from "./commands/untag.js";
+import { embed } from "./commands/embed.js";
+import { embedGpu } from "./commands/embed-gpu.js";
 
 // ── Projects commands ────────────────────────────────────────────────
 import { exportProjects } from "./commands/export.js";
@@ -53,8 +53,8 @@ const commands: Record<string, () => Promise<void>> = {
   discover,
   synthesize,
   classify,
-  index: mediaIndex,
-  untag,
+  embed,
+  "embed:gpu": embedGpu,
 
   // projects:*
   export: exportProjects,
@@ -94,8 +94,13 @@ if (!cmd || !commands[cmd]) {
   console.log("    npm run media:discover          1. Discover → DISCOVERY.md");
   console.log("    npm run media:synthesize        2. Synthesize → SUMMARY.md + PLAN.md");
   console.log("    npm run media:classify          3. Classify → frontmatter + INDEX.md");
-  console.log("    npm run media:index             Regenerate INDEX.md from existing tags");
-  console.log("    npm run media:untag             Strip frontmatter from all docs (restart tagging)");
+  console.log();
+  console.log("  RAG (embedding + vector search):");
+  console.log("    npm run media:embed             4. Embed chunks → workspace.db");
+  console.log("    npm run media:embed:dry         Preview without embedding");
+  console.log("    npm run media:embed:force       Re-embed all chunks");
+  console.log("    npm run media:embed:gpu         Embed on RunPod GPU (end-to-end)");
+  console.log("    npm run media:embed:gpu:dry     Preview GPU embed plan");
   console.log();
   console.log("  Bundle (export to Claude Projects or local use):");
   console.log("    npm run bundle       Export tagged docs → project folders");

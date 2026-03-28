@@ -693,7 +693,6 @@ export async function split(): Promise<void> {
 
   console.log();
   console.log("Next: npm run media:split:check → audit chunks");
-  console.log("      npm run media:discover    → enrich with tags + summary");
 }
 
 // ── split:check — audit chunks ──────────────────────────────────────
