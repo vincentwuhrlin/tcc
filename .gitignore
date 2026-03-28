@@ -1,9 +1,3 @@
-node_modules/
-dist/
-tmp/
+node_modules
+workspaces
 .env
-pod-info.json
-output/
-cookies/
-.videos-active.txt
-.transcribe.py

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tmp/
+.env
+pod-info.json
+output/
+cookies/
+.videos-active.txt
+.transcribe.py
