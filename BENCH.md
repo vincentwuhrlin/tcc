@@ -1,0 +1,1 @@
+$ npm run media:embed:bench -- --engines=nomic-uptimize --top-k=5,10,20,30,40,50

@@ -22,6 +22,8 @@ import { synthesize } from "./commands/synthesize.js";
 import { classify } from "./commands/classify.js";
 import { embed } from "./commands/embed.js";
 import { embedGpu } from "./commands/embed-gpu.js";
+import { embedImport } from "./commands/embed-import.js";
+import { embedBench } from "./commands/embed-bench.js";
 
 // ── Projects commands ────────────────────────────────────────────────
 import { exportProjects } from "./commands/export.js";
@@ -55,6 +57,8 @@ const commands: Record<string, () => Promise<void>> = {
   classify,
   embed,
   "embed:gpu": embedGpu,
+  "embed:import": embedImport,
+  "embed:bench": embedBench,
 
   // projects:*
   export: exportProjects,
@@ -101,6 +105,9 @@ if (!cmd || !commands[cmd]) {
   console.log("    npm run media:embed:force       Re-embed all chunks");
   console.log("    npm run media:embed:gpu         Embed on RunPod GPU (end-to-end)");
   console.log("    npm run media:embed:gpu:dry     Preview GPU embed plan");
+  console.log("    npm run media:embed:import      Import embeddings from another db");
+  console.log("    npm run media:embed:bench       Benchmark embedding engines (retrieval quality)");
+  console.log("    npm run media:embed:bench:dry   Preview benchmark plan");
   console.log();
   console.log("  Bundle (export to Claude Projects or local use):");
   console.log("    npm run bundle       Export tagged docs → project folders");
