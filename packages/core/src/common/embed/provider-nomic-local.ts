@@ -4,48 +4,78 @@
  * Uses @huggingface/transformers (transformers.js) to run the model
  * directly in Node.js on CPU. No server, no API, no network needed.
  *
- * Model:      nomic-ai/nomic-embed-text-v1.5 (quantized int8, ~137 MB)
+ * Model:      nomic-ai/nomic-embed-text-v1.5
  * Dimensions: 768 (full matryoshka)
  * Context:    8192 tokens
  *
- * First call downloads the model (~137 MB) and caches it in ~/.cache/huggingface/.
- * Subsequent calls load from cache in ~3-5s.
- * Each embedding takes ~200-400ms on CPU.
+ * Quantization controlled by RAG_DTYPE env var or constructor param:
+ *   - "q8"   → int8 quantized, ~137 MB (default, fastest)
+ *   - "fp16" → half precision, ~274 MB
+ *   - "fp32" → full precision, ~547 MB (best quality, slowest)
+ *
+ * Model name in DB includes dtype: "nomic-embed-text-v1.5-q8", "nomic-embed-text-v1.5-fp16", etc.
+ * This allows different dtypes to coexist in the same workspace.db.
  *
  * Nomic v1.5 requires task prefixes:
  *   - embedChunks: "search_document: <text>"
  *   - embedQuery:  "search_query: <text>"
  */
 import type { EmbedEngine, EmbedEngineInfo } from "./types.js";
+import { RAG_DTYPE } from "../../config.js";
 
 const MODEL_ID = "nomic-ai/nomic-embed-text-v1.5";
-const MODEL_NAME = "nomic-embed-text-v1.5";
 const DIMENSIONS = 768;
+const DEFAULT_DTYPE = "q8";
+const VALID_DTYPES = ["q8", "fp16", "fp32"];
 
-// Lazy-loaded pipeline singleton
-let _pipeline: any = null;
+const DTYPE_SIZES: Record<string, string> = {
+  q8: "~137 MB",
+  fp16: "~274 MB",
+  fp32: "~547 MB",
+};
 
-async function getPipeline() {
-  if (_pipeline) return _pipeline;
+// Pipeline cache — keyed by dtype so multiple instances can coexist
+const _pipelines: Map<string, any> = new Map();
 
-  console.log(`   ⏳ Loading ${MODEL_ID} (first time downloads ~137 MB)...`);
+async function getPipeline(dtype: string) {
+  if (_pipelines.has(dtype)) return _pipelines.get(dtype);
+
+  const size = DTYPE_SIZES[dtype] ?? "unknown size";
+  console.log(`   ⏳ Loading ${MODEL_ID} [${dtype}] (first time downloads ${size})...`);
   const startMs = Date.now();
 
   const { pipeline } = await import("@huggingface/transformers");
-  _pipeline = await pipeline("feature-extraction", MODEL_ID, {
-    dtype: "q8",       // quantized int8 — ~137 MB instead of ~547 MB
+  const pipe = await pipeline("feature-extraction", MODEL_ID, {
+    dtype,
     revision: "main",
   });
 
+  _pipelines.set(dtype, pipe);
   const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-  console.log(`   ✅ Model loaded in ${elapsed}s`);
+  console.log(`   ✅ Model loaded in ${elapsed}s [${dtype}]`);
 
-  return _pipeline;
+  return pipe;
 }
 
 export class LocalNomicEngine implements EmbedEngine {
+  private dtype: string;
+
+  constructor(dtype?: string) {
+    const resolved = dtype ?? RAG_DTYPE || DEFAULT_DTYPE;
+    if (!VALID_DTYPES.includes(resolved)) {
+      console.error(`❌ Invalid RAG_DTYPE="${resolved}" for nomic-local. Valid: ${VALID_DTYPES.join(", ")}`);
+      process.exit(1);
+    }
+    this.dtype = resolved;
+  }
+
   info(): EmbedEngineInfo {
-    return { engine: "nomic-local", model: MODEL_NAME, dimensions: DIMENSIONS, mode: "local" };
+    return {
+      engine: "nomic-local",
+      model: `nomic-embed-text-v1.5-${this.dtype}`,
+      dimensions: DIMENSIONS,
+      mode: "local",
+    };
   }
 
   async embedQuery(text: string): Promise<number[]> {
@@ -56,7 +86,6 @@ export class LocalNomicEngine implements EmbedEngine {
     texts: string[],
     options?: { concurrency?: number; onProgress?: (done: number, total: number) => void },
   ): Promise<number[][]> {
-    // CPU-bound: concurrency > 1 won't help, process sequentially
     const results: number[][] = [];
     for (let i = 0; i < texts.length; i++) {
       results.push(await this.run(`search_document: ${texts[i]}`));
@@ -66,7 +95,7 @@ export class LocalNomicEngine implements EmbedEngine {
   }
 
   private async run(prefixedText: string): Promise<number[]> {
-    const extractor = await getPipeline();
+    const extractor = await getPipeline(this.dtype);
     const output = await extractor(prefixedText, { pooling: "mean", normalize: true });
     return Array.from(output.data).slice(0, DIMENSIONS) as number[];
   }

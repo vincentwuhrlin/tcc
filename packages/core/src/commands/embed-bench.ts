@@ -121,15 +121,15 @@ function parseArgs() {
     hardCount: parseInt(args.find((a) => a.startsWith("--hard-count="))?.split("=")[1] ?? "100", 10),
     hardClusters: parseInt(args.find((a) => a.startsWith("--hard-clusters="))?.split("=")[1] ?? "30", 10),
     engines: args.find((a) => a.startsWith("--engines="))?.split("=")[1]
-      ?.split(",").map((e) => e.trim()) as RagEngineType[] | undefined ?? null,
+      ?.split(/[,\s]+/).map((e) => e.trim()).filter(Boolean) as RagEngineType[] | undefined ?? null,
     topK: args.find((a) => a.startsWith("--top-k="))?.split("=")[1]
-      ?.split(",").map((k) => parseInt(k.trim(), 10)) ?? DEFAULT_K_VALUES,
+      ?.split(/[,\s]+/).map((k) => parseInt(k.trim(), 10)).filter(Boolean) ?? DEFAULT_K_VALUES,
   };
 }
 
 // ── Engine factory (bypasses singleton) ──────────────────────────────
 
-async function createEngine(name: RagEngineType): Promise<EmbedEngine> {
+async function createEngine(name: RagEngineType, dtype?: string): Promise<EmbedEngine> {
   switch (name) {
     case "nomic-uptimize": {
       const { UptimizeNomicEngine } = await import("../common/embed/provider-nomic-uptimize.js");
@@ -137,11 +137,11 @@ async function createEngine(name: RagEngineType): Promise<EmbedEngine> {
     }
     case "nomic-local": {
       const { LocalNomicEngine } = await import("../common/embed/provider-nomic-local.js");
-      return new LocalNomicEngine();
+      return new LocalNomicEngine(dtype);
     }
     case "jina-local": {
       const { LocalJinaEngine } = await import("../common/embed/provider-jina-local.js");
-      return new LocalJinaEngine();
+      return new LocalJinaEngine(dtype);
     }
     default:
       throw new Error(`Unknown engine: ${name}`);
@@ -150,21 +150,45 @@ async function createEngine(name: RagEngineType): Promise<EmbedEngine> {
 
 // ── Detect available engines from DB ─────────────────────────────────
 
-function detectEngines(): { engine: RagEngineType; model: string; count: number }[] {
+/** Model prefix → engine type mapping. Handles both old and new model names. */
+const MODEL_PREFIXES: { prefix: string; engine: RagEngineType }[] = [
+  { prefix: "nomic-embed-text-v1.5", engine: "nomic-local" },   // must be before v1
+  { prefix: "nomic-embed-text-v1",   engine: "nomic-uptimize" },
+  { prefix: "jina-embeddings-v3",    engine: "jina-local" },
+];
+
+interface DetectedEngine {
+  engine: RagEngineType;
+  model: string;
+  dtype: string | null;  // null for API engines (no dtype)
+  count: number;
+}
+
+function detectEngines(): DetectedEngine[] {
   const db = getDb();
   const rows = db.prepare(
     "SELECT model, COUNT(*) as cnt FROM embeddings GROUP BY model",
   ).all() as { model: string; cnt: number }[];
 
-  const map: Record<string, RagEngineType> = {
-    "nomic-embed-text-v1": "nomic-uptimize",
-    "nomic-embed-text-v1.5": "nomic-local",
-    "jina-embeddings-v3": "jina-local",
-  };
+  const results: DetectedEngine[] = [];
 
-  return rows.filter((r) => map[r.model]).map((r) => ({
-    engine: map[r.model], model: r.model, count: r.cnt,
-  }));
+  for (const row of rows) {
+    const match = MODEL_PREFIXES.find((p) => row.model.startsWith(p.prefix));
+    if (!match) continue;
+
+    // Extract dtype suffix: "nomic-embed-text-v1.5-fp16" → "fp16"
+    const suffix = row.model.slice(match.prefix.length);
+    const dtype = suffix.startsWith("-") ? suffix.slice(1) : null;
+
+    results.push({
+      engine: match.engine,
+      model: row.model,
+      dtype,
+      count: row.cnt,
+    });
+  }
+
+  return results;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -186,36 +210,41 @@ function truncateContent(content: string): string {
 
 /**
  * Extract JSON from an LLM response that may contain preamble text.
- * Handles: markdown fences, "Looking at..." preamble, trailing text.
+ * Handles: markdown fences, "Looking at..." preamble, "[ID: ..." false starts,
+ * trailing text after JSON, etc.
+ *
+ * Strategy: find all { and [ positions, try JSON.parse from each until one works.
  */
 function extractJson(raw: string): string {
   // Strip markdown fences first
-  let text = raw.replace(/```json\s*|```\s*/g, "").trim();
+  const text = raw.replace(/```json\s*|```\s*/g, "").trim();
 
-  // Find the first { or [ and the last } or ]
-  const startObj = text.indexOf("{");
-  const startArr = text.indexOf("[");
-  let start: number;
+  // Collect all potential JSON start positions
+  const candidates: { pos: number; endChar: string }[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") candidates.push({ pos: i, endChar: "}" });
+    else if (text[i] === "[") candidates.push({ pos: i, endChar: "]" });
+  }
 
-  if (startObj === -1 && startArr === -1) {
+  if (candidates.length === 0) {
     throw new Error(`No JSON found in LLM response: ${text.slice(0, 100)}...`);
-  } else if (startObj === -1) {
-    start = startArr;
-  } else if (startArr === -1) {
-    start = startObj;
-  } else {
-    start = Math.min(startObj, startArr);
   }
 
-  const isArray = text[start] === "[";
-  const endChar = isArray ? "]" : "}";
-  const end = text.lastIndexOf(endChar);
+  // Try each candidate: slice from start to last matching bracket, try to parse
+  for (const { pos, endChar } of candidates) {
+    const lastEnd = text.lastIndexOf(endChar);
+    if (lastEnd <= pos) continue;
 
-  if (end <= start) {
-    throw new Error(`Malformed JSON in LLM response: ${text.slice(0, 100)}...`);
+    const slice = text.slice(pos, lastEnd + 1);
+    try {
+      JSON.parse(slice);
+      return slice; // Valid JSON found
+    } catch {
+      // Not valid JSON from this position, try next candidate
+    }
   }
 
-  return text.slice(start, end + 1);
+  throw new Error(`Could not extract valid JSON from LLM response: ${text.slice(0, 150)}...`);
 }
 
 function percentile(sorted: number[], p: number): number {
@@ -420,26 +449,27 @@ function computeMetrics(ranks: (number | null)[], kValues: number[]) {
 }
 
 async function runBenchmark(
-  queries: BenchQuery[], engineNames: RagEngineType[], topKValues: number[],
+  queries: BenchQuery[], engines: DetectedEngine[], topKValues: number[],
 ): Promise<BenchmarkResult> {
   console.log(`\n🏁 Phase 2: Running benchmark`);
 
   const stdCount = queries.filter((q) => q.difficulty === "standard").length;
   const hardCount = queries.filter((q) => q.difficulty === "hard").length;
   console.log(`   Queries:  ${queries.length} (${stdCount} standard + ${hardCount} hard)`);
-  console.log(`   Engines:  ${engineNames.join(", ")}`);
+  console.log(`   Models:   ${engines.map((e) => e.model).join(", ")}`);
   console.log(`   Top-K:    ${topKValues.join(", ")}`);
 
   const maxK = Math.max(...topKValues);
   const allMetrics: EngineMetrics[] = [];
   const allResults: QueryResult[] = [];
 
-  for (const engineName of engineNames) {
-    console.log(`\n── ${engineName} ${"─".repeat(50 - engineName.length)}`);
+  for (const detected of engines) {
+    const label = detected.dtype ? `${detected.engine} [${detected.dtype}]` : detected.engine;
+    console.log(`\n── ${label} ${"─".repeat(Math.max(1, 50 - label.length))}`);
 
     let engine: EmbedEngine;
     try {
-      engine = await createEngine(engineName);
+      engine = await createEngine(detected.engine, detected.dtype ?? undefined);
     } catch (err) {
       console.error(`   ❌ Could not create engine: ${err instanceof Error ? err.message : err}`);
       continue;
@@ -448,9 +478,10 @@ async function runBenchmark(
     const info = engine.info();
     console.log(`   Model:      ${info.model} (${info.dimensions}d, ${info.mode})`);
 
-    const embeddings = loadEmbeddings(info.model);
+    // Load embeddings by the model name stored in DB
+    const embeddings = loadEmbeddings(detected.model);
     if (embeddings.length === 0) {
-      console.error(`   ❌ No embeddings for ${info.model}. Run media:embed with RAG_ENGINE=${engineName}.`);
+      console.error(`   ❌ No embeddings for ${detected.model}.`);
       continue;
     }
     console.log(`   Embeddings: ${embeddings.length}`);
@@ -498,7 +529,7 @@ async function runBenchmark(
         expected_chunk_id: q.expected_chunk_id,
         source: q.source,
         difficulty: q.difficulty,
-        engine: engineName,
+        engine: detected.model,
         rank,
         top1_chunk_id: top1Id,
         top1_score: Math.round(top1Score * 10000) / 10000,
@@ -532,7 +563,7 @@ async function runBenchmark(
     }
 
     allMetrics.push({
-      engine: engineName, model: info.model, dimensions: info.dimensions,
+      engine: detected.model, model: info.model, dimensions: info.dimensions,
       mode: info.mode, embeddings_count: embeddings.length,
       recall: allM.recall, mrr: allM.mrr,
       recall_standard: stdM.recall, mrr_standard: stdM.mrr,
@@ -888,9 +919,12 @@ export async function embedBench(): Promise<void> {
 
   const engineNames = requestedEngines
     ? requestedEngines.filter((e) => available.some((a) => a.engine === e))
-    : available.map((a) => a.engine);
+    : [...new Set(available.map((a) => a.engine))];
 
-  if (engineNames.length === 0) {
+  // Filter available models by requested engine names
+  const toBench = available.filter((a) => engineNames.includes(a.engine));
+
+  if (toBench.length === 0) {
     console.error("❌ None of the requested engines have embeddings in the DB.");
     process.exit(1);
   }
@@ -903,14 +937,14 @@ export async function embedBench(): Promise<void> {
   const stdBatches = Math.ceil(Math.ceil(count / QUERIES_PER_CHUNK) / CHUNKS_PER_LLM_CALL);
   const totalLlm = stdBatches + (enableHard ? hardClusters : 0);
 
-  console.log(`\n   Engines:          ${engineNames.join(", ")}`);
+  console.log(`\n   Models to bench:  ${toBench.map((e) => e.model).join(", ")}`);
   console.log(`   Standard queries: ${count} (${QUERIES_PER_CHUNK}/chunk, ~${stdBatches} LLM calls)`);
   if (enableHard) console.log(`   Hard queries:     ${hardCount} (~${hardClusters} clusters)`);
   console.log(`   Total LLM calls:  ~${totalLlm}`);
   console.log(`   K values:         ${topK.join(", ")}`);
 
   if (dryRun) {
-    console.log(`\n🔍 Dry run — would generate ~${count + (enableHard ? hardCount : 0)} queries and benchmark ${engineNames.length} engines.`);
+    console.log(`\n🔍 Dry run — would generate ~${count + (enableHard ? hardCount : 0)} queries and benchmark ${toBench.length} model(s).`);
     return;
   }
 
@@ -947,7 +981,7 @@ export async function embedBench(): Promise<void> {
   if (benchQueries.length === 0) { console.error("❌ No queries."); process.exit(1); }
 
   // Phase 2
-  const { metrics, queryResults } = await runBenchmark(benchQueries, engineNames, topK);
+  const { metrics, queryResults } = await runBenchmark(benchQueries, toBench, topK);
   if (metrics.length === 0) { console.error("❌ No results."); process.exit(1); }
 
   // Phase 3

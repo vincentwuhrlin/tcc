@@ -179,6 +179,12 @@ export const RAG_BATCH_SIZE = parseInt(process.env.RAG_BATCH_SIZE ?? "10", 10);
 export const RAG_BATCH_CONCURRENCY = parseInt(process.env.RAG_BATCH_CONCURRENCY ?? "5", 10);
 export const RAG_TOP_K = parseInt(process.env.RAG_TOP_K ?? "20", 10);
 
+// Quantization for local embedding models.
+// Values: "q8" (int8, smallest/fastest), "fp16" (half precision), "fp32" (full precision)
+// Default varies per provider: nomic-local="q8", jina-local="fp16"
+// Stored in model name in DB so different dtypes coexist: e.g. "nomic-embed-text-v1.5-fp16"
+export const RAG_DTYPE = process.env.RAG_DTYPE ?? "";
+
 // ── Projects (Claude Projects export) ───────────────────────────────
 export const BUNDLES_FILE = resolvePath(process.env.BUNDLES_FILE ?? join(BUNDLES_DIR, "bundles.json"));
 export const BUNDLE_MIN_QUALITY = process.env.BUNDLE_MIN_QUALITY ?? "medium";

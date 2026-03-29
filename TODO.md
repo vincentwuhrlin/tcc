@@ -11,3 +11,15 @@ bundle → pExactement, le split c'est la fondation — et elle est propre. Le p
 5. **bundle** → packing en bundles pour Claude Projects
 
 On passe au `media:discover` ?
+
+
+
+RAG_ENGINE=jina-local RAG_DTYPE=fp32 pnpm run media:embed
+
+
+nomic-embed-text-v1✅ existant (uptimize API)
+nomic-embed-text-v1.5-q8✅ existant (renommé)
+nomic-embed-text-v1.5-fp16🆕 à générer
+jina-embeddings-v3-fp16✅ existant (renommé)
+jina-embeddings-v3-fp32🆕 à générer
+

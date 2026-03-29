@@ -4,46 +4,75 @@
  * Uses @huggingface/transformers low-level API (not pipeline).
  * Jina v3 uses LoRA task adapters, requiring a task_id input.
  *
- * Model:      jinaai/jina-embeddings-v3 (~570M params, fp16 ~1.1 GB)
+ * Model:      jinaai/jina-embeddings-v3 (~570M params)
  * Dimensions: 1024
  * Context:    8192 tokens
  * Tasks:      retrieval.query, retrieval.passage, separation, classification, text-matching
  *
- * Based on: https://github.com/huggingface/transformers.js/issues/1072
+ * Quantization controlled by RAG_DTYPE env var or constructor param:
+ *   - "fp16" → half precision, ~1.1 GB (default)
+ *   - "fp32" → full precision, ~2.2 GB (best quality, slowest)
  *
- * First call downloads the model (~1.1 GB) and caches it in ~/.cache/huggingface/.
- * Each embedding takes ~1-3s on CPU (570M params is significantly heavier than Nomic 137M).
+ * Model name in DB includes dtype: "jina-embeddings-v3-fp16", etc.
+ *
+ * Based on: https://github.com/huggingface/transformers.js/issues/1072
  */
 import type { EmbedEngine, EmbedEngineInfo } from "./types.js";
+import { RAG_DTYPE } from "../../config.js";
 
 const MODEL_ID = "jinaai/jina-embeddings-v3";
-const MODEL_NAME = "jina-embeddings-v3";
 const DIMENSIONS = 1024;
+const DEFAULT_DTYPE = "fp16";
+const VALID_DTYPES = ["fp16", "fp32"];
 
-// Lazy-loaded model singleton
-let _tokenizer: any = null;
-let _model: any = null;
-let _taskInstructions: Record<string, string> = {};
+const DTYPE_SIZES: Record<string, string> = {
+  fp16: "~1.1 GB",
+  fp32: "~2.2 GB",
+};
 
-async function loadModel() {
-  if (_model) return;
+// Model cache — keyed by dtype
+const _models: Map<string, { tokenizer: any; model: any; taskInstructions: Record<string, string> }> = new Map();
 
-  console.log(`   ⏳ Loading ${MODEL_ID} (first time downloads ~1.1 GB)...`);
+async function loadModel(dtype: string) {
+  if (_models.has(dtype)) return _models.get(dtype)!;
+
+  const size = DTYPE_SIZES[dtype] ?? "unknown size";
+  console.log(`   ⏳ Loading ${MODEL_ID} [${dtype}] (first time downloads ${size})...`);
   const startMs = Date.now();
 
   const { AutoTokenizer, PreTrainedModel } = await import("@huggingface/transformers");
 
-  _tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
-  _model = await PreTrainedModel.from_pretrained(MODEL_ID, { dtype: "fp16" });
-  _taskInstructions = _model.config.task_instructions ?? {};
+  const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
+  const model = await PreTrainedModel.from_pretrained(MODEL_ID, { dtype });
+  const taskInstructions = model.config.task_instructions ?? {};
 
   const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-  console.log(`   ✅ Model loaded in ${elapsed}s`);
+  console.log(`   ✅ Model loaded in ${elapsed}s [${dtype}]`);
+
+  const entry = { tokenizer, model, taskInstructions };
+  _models.set(dtype, entry);
+  return entry;
 }
 
 export class LocalJinaEngine implements EmbedEngine {
+  private dtype: string;
+
+  constructor(dtype?: string) {
+    const resolved = dtype ?? RAG_DTYPE || DEFAULT_DTYPE;
+    if (!VALID_DTYPES.includes(resolved)) {
+      console.error(`❌ Invalid RAG_DTYPE="${resolved}" for jina-local. Valid: ${VALID_DTYPES.join(", ")}`);
+      process.exit(1);
+    }
+    this.dtype = resolved;
+  }
+
   info(): EmbedEngineInfo {
-    return { engine: "jina-local", model: MODEL_NAME, dimensions: DIMENSIONS, mode: "local" };
+    return {
+      engine: "jina-local",
+      model: `jina-embeddings-v3-${this.dtype}`,
+      dimensions: DIMENSIONS,
+      mode: "local",
+    };
   }
 
   async embedQuery(text: string): Promise<number[]> {
@@ -54,7 +83,6 @@ export class LocalJinaEngine implements EmbedEngine {
     texts: string[],
     options?: { concurrency?: number; onProgress?: (done: number, total: number) => void },
   ): Promise<number[][]> {
-    // CPU-bound: process sequentially
     const results: number[][] = [];
     for (let i = 0; i < texts.length; i++) {
       results.push(await this.run(texts[i], "retrieval.passage"));
@@ -64,29 +92,22 @@ export class LocalJinaEngine implements EmbedEngine {
   }
 
   private async run(text: string, task: string): Promise<number[]> {
-    await loadModel();
-
+    const { tokenizer, model, taskInstructions } = await loadModel(this.dtype);
     const { Tensor } = await import("@huggingface/transformers");
 
-    // Add task instruction prefix
-    const prefix = _taskInstructions[task] ?? "";
+    const prefix = taskInstructions[task] ?? "";
     const prefixedText = prefix + text;
 
-    // Tokenize
-    const inputs = await _tokenizer([prefixedText], { padding: true, truncation: true });
+    const inputs = await tokenizer([prefixedText], { padding: true, truncation: true });
 
-    // Get task_id index
-    const taskKeys = Object.keys(_taskInstructions);
+    const taskKeys = Object.keys(taskInstructions);
     const taskId = taskKeys.indexOf(task);
 
-    // Run model with task_id
-    const output = await _model({
+    const output = await model({
       ...inputs,
       task_id: new Tensor("int64", [taskId >= 0 ? taskId : 0], []),
     });
 
-    // Extract pooled embeddings — Jina v3 returns named outputs,
-    // the pooled_embeds key may be numeric (13049) or named
     const pooled = output.pooled_embeds ?? output.text_embeds ?? Object.values(output).find(
       (v: any) => v?.dims && v.dims[v.dims.length - 1] === DIMENSIONS,
     );
@@ -95,11 +116,8 @@ export class LocalJinaEngine implements EmbedEngine {
       throw new Error("Could not extract embeddings from Jina v3 output");
     }
 
-    // Normalize
     const normalized = pooled.normalize();
     const data: Float32Array = normalized.data;
-
-    // Return first (and only) embedding
     return Array.from(data).slice(0, DIMENSIONS);
   }
 }
