@@ -517,7 +517,7 @@ async function chunkVideo(
     };
   }
 
-  // Build chunks from segments
+  // Build chunks from segments — re-split oversized segments at paragraph boundaries
   const chunks: Chunk[] = [];
 
   for (let i = 0; i < segments.length; i++) {
@@ -530,28 +530,54 @@ async function chunkVideo(
     const segContent = lines.slice(startLine, endLine).join("\n").trim();
     if (segContent.length < 50) continue;
 
-    const chars = segContent.length;
-    const chunkIndex = chunks.length + 1;
+    if (segContent.length > MEDIA_SPLIT_MAX_CHUNK) {
+      // Oversized video segment → split at paragraph boundaries
+      const subSegments = splitOversizedSection(lines, startLine, endLine, MEDIA_SPLIT_MAX_CHUNK);
 
-    const meta: ChunkMeta = {
-      source_origin: source.sourceOrigin,
-      source_type: "videos",
-      source_duration: source.duration,
-      source_language: source.language,
-      chunk_index: chunkIndex,
-      chunk_total: 0, // filled later
-      title: seg.title,
-      summary: seg.summary,
-      chars,
-      tokens_approx: Math.round(chars / 4),
-    };
+      for (let si = 0; si < subSegments.length; si++) {
+        const sub = subSegments[si];
+        const subContent = lines.slice(sub.startLine, sub.endLine).join("\n").trim();
+        if (subContent.length < 50) continue;
+        const chars = subContent.length;
+        const partLabel = subSegments.length > 1 ? ` (part ${si + 1}/${subSegments.length})` : "";
 
-    chunks.push({
-      filename: chunkFileName(baseName, chunkIndex),
-      body: segContent,
-      chars,
-      meta,
-    });
+        const meta: ChunkMeta = {
+          source_origin: source.sourceOrigin,
+          source_type: "videos",
+          source_duration: source.duration,
+          source_language: source.language,
+          chunk_index: chunks.length + 1,
+          chunk_total: 0,
+          title: `${seg.title}${partLabel}`,
+          summary: seg.summary,
+          chars,
+          tokens_approx: Math.round(chars / 4),
+        };
+        chunks.push({ filename: chunkFileName(baseName, chunks.length + 1), body: subContent, chars, meta });
+      }
+    } else {
+      const chars = segContent.length;
+
+      const meta: ChunkMeta = {
+        source_origin: source.sourceOrigin,
+        source_type: "videos",
+        source_duration: source.duration,
+        source_language: source.language,
+        chunk_index: chunks.length + 1,
+        chunk_total: 0,
+        title: seg.title,
+        summary: seg.summary,
+        chars,
+        tokens_approx: Math.round(chars / 4),
+      };
+
+      chunks.push({
+        filename: chunkFileName(baseName, chunks.length + 1),
+        body: segContent,
+        chars,
+        meta,
+      });
+    }
   }
 
   finalizeChunks(chunks);

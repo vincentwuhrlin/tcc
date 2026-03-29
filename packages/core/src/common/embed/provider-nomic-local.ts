@@ -97,9 +97,10 @@ export class LocalNomicEngine implements EmbedEngine {
   private async run(prefixedText: string): Promise<number[]> {
     // Truncate long texts to avoid ONNX rotary embedding bugs in fp16/fp32
     // with certain sequence lengths (off-by-one in rotary position embeddings).
-    // 4000 chars ≈ 1000 tokens — safe threshold. Matches MEDIA_SPLIT_MAX_CHUNK.
-    // After re-split, all chunks will be ≤4000 chars so no truncation occurs.
-    const MAX_INPUT_CHARS = 4000;
+    // Crashes observed at 2200+ tokens. Limit to 5000 chars (~1250 tokens)
+    // which covers ⚠️ chunks slightly above MEDIA_SPLIT_MAX_CHUNK while
+    // staying safely under the 2000-token crash zone.
+    const MAX_INPUT_CHARS = 5000;
     const safeText = prefixedText.length > MAX_INPUT_CHARS
       ? prefixedText.slice(0, MAX_INPUT_CHARS)
       : prefixedText;
