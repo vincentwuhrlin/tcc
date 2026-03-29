@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { OUTPUT_DIR, PLAN_FILE, CONTEXT_DIR, MEDIA_SYNTHESIZE_MAX_TOKENS, printHeader } from "../config.js";
 import { loadDomain } from "../common/prompts.js";
-import { llmCall } from "../common/llm.js";
+import { llmCall, isQuotaError } from "../common/llm.js";
 import { scanMarkdownFiles } from "../common/media.js";
 
 // ── Frontmatter parser (lightweight YAML) ────────────────────────────
@@ -197,7 +197,16 @@ export async function synthesize(): Promise<void> {
   const planPrompt = loadSynthesizePrompt("prompt-plan.md");
   const planUser = planPrompt.userTemplate.replace("{{CONTENT}}", input);
   const timer1 = startProgress();
-  const planResponse = await llmCall(planPrompt.system, planUser, MEDIA_SYNTHESIZE_MAX_TOKENS);
+  let planResponse: string;
+  try {
+    planResponse = await llmCall(planPrompt.system, planUser, MEDIA_SYNTHESIZE_MAX_TOKENS);
+  } catch (err) {
+    stopProgress(timer1);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`\n   ❌ PLAN.md generation failed: ${msg.slice(0, 150)}`);
+    if (isQuotaError(err)) console.error(`   🛑 API quota/rate limit reached. Try again after quota reset.`);
+    process.exit(1);
+  }
   stopProgress(timer1);
 
   writeFileSync(PLAN_FILE, planResponse.trim());
@@ -209,7 +218,16 @@ export async function synthesize(): Promise<void> {
   const summaryPrompt = loadSynthesizePrompt("prompt-summary.md");
   const summaryUser = summaryPrompt.userTemplate.replace("{{CONTENT}}", input);
   const timer2 = startProgress();
-  const summaryResponse = await llmCall(summaryPrompt.system, summaryUser, MEDIA_SYNTHESIZE_MAX_TOKENS);
+  let summaryResponse: string;
+  try {
+    summaryResponse = await llmCall(summaryPrompt.system, summaryUser, MEDIA_SYNTHESIZE_MAX_TOKENS);
+  } catch (err) {
+    stopProgress(timer2);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`\n   ❌ SUMMARY.md generation failed: ${msg.slice(0, 150)}`);
+    if (isQuotaError(err)) console.error(`   🛑 API quota/rate limit reached. Try again after quota reset.`);
+    process.exit(1);
+  }
   stopProgress(timer2);
 
   writeFileSync(join(OUTPUT_DIR, "SUMMARY.md"), summaryResponse.trim());

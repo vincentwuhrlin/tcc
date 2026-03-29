@@ -25,6 +25,7 @@ import { OUTPUT_DIR, printHeader, RAG_BATCH_SIZE, RAG_BATCH_CONCURRENCY, RAG_API
 import { getEmbedEngine } from "../common/embed/index.js";
 import { upsertEmbedding, getEmbeddingIds, countEmbeddings, getDbStats } from "../common/db.js";
 import { stripFrontmatter } from "../common/media.js";
+import { isQuotaError, logQuotaStop } from "../common/llm.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -149,9 +150,10 @@ export async function embed(): Promise<void> {
     } catch (err) {
       // Log error but continue with next batch
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`\n   ❌ Batch error at ${batch[0].id}: ${msg}`);
+      console.error(`\n   ❌ Batch error at ${batch[0].id}: ${msg.slice(0, 120)}`);
       errors += batch.length;
       done += batch.length;
+      if (isQuotaError(err)) { logQuotaStop("embedding", done - errors); break; }
     }
 
     // Progress

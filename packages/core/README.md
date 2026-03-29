@@ -1,4 +1,4 @@
-# tcc — Transcript, Classify, Chat
+# tcc — Transcript, Classify, Chat !
 
 **Lots of media files → Transcription → Classified knowledge base → Chat!**
 

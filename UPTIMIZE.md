@@ -22,3 +22,12 @@ $headers = @{
 
 $body = '{"input": "How to install IEM Virtual on VMware ESXi", "model": "nomic-embed-text-v1"}'
 Invoke-RestMethod -Uri "https://api.nlp.p.uptimize.merckgroup.com/nomic/v1/embeddings" -Method POST -Headers $headers -Body $body | ConvertTo-Json -Depth 3
+
+
+
+$response = Invoke-WebRequest -Method Post `
+  -Uri "https://api.nlp.p.uptimize.merckgroup.com/nomic/v1/embeddings" `
+-Headers @{ "api-key" = "$env:UPTIMIZE_TOKEN"; "Content-Type" = "application/json" } `
+-Body '{"input": "test", "model": "nomic-embed-text-v1"}'
+
+$response.Headers

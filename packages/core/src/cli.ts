@@ -31,6 +31,9 @@ import { exportProjects } from "./commands/export.js";
 // ── Interactive ─────────────────────────────────────────────────────
 import { chat } from "./commands/chat.js";
 
+// ── Utilities ───────────────────────────────────────────────────────
+import { uptimizeStats } from "./commands/uptimize-stats.js";
+
 // ── Command registry ────────────────────────────────────────────────
 const commands: Record<string, () => Promise<void>> = {
   // transcript:*
@@ -65,12 +68,15 @@ const commands: Record<string, () => Promise<void>> = {
 
   // interactive
   chat,
+
+  // utilities
+  "uptimize:stats": uptimizeStats,
 };
 
 const cmd = process.argv[2];
 
 if (!cmd || !commands[cmd]) {
-  console.log("tcc — Transcript, Classify, Chat!");
+  console.log("tcc — Transcript, Classify, Chat !");
   console.log();
   console.log("  Transcription (local tools):");
   console.log("    npm run transcript:setup        Install runpodctl, yt-dlp, ffmpeg");
@@ -115,6 +121,9 @@ if (!cmd || !commands[cmd]) {
   console.log();
   console.log("  Interactive:");
   console.log("    npm run chat                   Chat with your knowledge base");
+  console.log();
+  console.log("  Utilities:");
+  console.log("    npm run uptimize:stats         Check UPTIMIZE API spend and status");
   console.log();
   console.log("  All commands accept --workspace=<path> to override WORKSPACE from .env");
   console.log();

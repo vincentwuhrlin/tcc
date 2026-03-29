@@ -29,7 +29,7 @@ import {
   WORKSPACE, OUTPUT_DIR, printHeader,
   type RagEngineType,
 } from "../config.js";
-import { llmCall } from "../common/llm.js";
+import { llmCall, isQuotaError, logQuotaStop } from "../common/llm.js";
 import { getDb, loadEmbeddings, type StoredEmbedding } from "../common/db.js";
 import { cosineSimilarity } from "../common/rag.js";
 import type { EmbedEngine } from "../common/embed/types.js";
@@ -278,7 +278,8 @@ async function generateStandardQueries(
     try {
       queries.push(...await generateStandardBatch(batch));
     } catch (err) {
-      console.error(`\n      ⚠️  Batch ${batchIdx} failed: ${err instanceof Error ? err.message : err}`);
+      console.error(`\n      ⚠️  Batch ${batchIdx} failed: ${err instanceof Error ? err.message.slice(0, 120) : err}`);
+      if (isQuotaError(err)) { logQuotaStop("query generation", queries.length); break; }
     }
     if (queries.length >= targetCount) break;
   }
@@ -361,7 +362,8 @@ async function generateHardQueries(
     try {
       queries.push(...await generateHardBatch(clusters[ci], qPerCluster));
     } catch (err) {
-      console.error(`\n      ⚠️  Cluster ${ci + 1} failed: ${err instanceof Error ? err.message : err}`);
+      console.error(`\n      ⚠️  Cluster ${ci + 1} failed: ${err instanceof Error ? err.message.slice(0, 120) : err}`);
+      if (isQuotaError(err)) { logQuotaStop("hard query generation", queries.length); break; }
     }
     if (queries.length >= targetCount) break;
   }
@@ -489,6 +491,8 @@ async function runBenchmark(
     const ranks: { rank: number | null; difficulty: QueryDifficulty }[] = [];
     const timings: number[] = [];
     const startTotal = Date.now();
+    let evalErrors = 0;
+    let lastEvalError = "";
 
     for (let qi = 0; qi < queries.length; qi++) {
       const q = queries[qi];
@@ -517,7 +521,15 @@ async function runBenchmark(
           rank = expectedIdx + 1;
           expectedScore = scored[expectedIdx].score;
         }
-      } catch { /* rank stays null */ }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        evalErrors++;
+        if (msg !== lastEvalError || evalErrors <= 3) {
+          console.error(`\n   ❌ Query embed failed: ${msg.slice(0, 120)}`);
+          lastEvalError = msg;
+        }
+        if (isQuotaError(err)) { logQuotaStop("benchmark evaluation", qi); break; }
+      }
 
       const latency = Date.now() - startQ;
       timings.push(latency);
@@ -542,6 +554,10 @@ async function runBenchmark(
     }
 
     const totalTime = (Date.now() - startTotal) / 1000;
+
+    if (evalErrors > 0) {
+      console.log(`\n   ⚠️  ${evalErrors} embedding errors during evaluation (results may be incomplete)`);
+    }
 
     const allRankValues = ranks.map((r) => r.rank);
     const stdRanks = ranks.filter((r) => r.difficulty === "standard").map((r) => r.rank);

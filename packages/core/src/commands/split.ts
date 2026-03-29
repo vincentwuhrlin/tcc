@@ -23,7 +23,7 @@ import {
 } from "../config.js";
 import { parseToc } from "../common/toc-parser.js";
 import type { ExtractedHeading } from "../common/toc-parser.js";
-import { llmCall } from "../common/llm.js";
+import { llmCall, isQuotaError, logQuotaStop } from "../common/llm.js";
 import { franc } from "franc-min";
 
 // ── Language detection ────────────────────────────────────────────────
@@ -517,7 +517,7 @@ async function chunkVideo(
     };
   }
 
-  // Build chunks from segments — re-split oversized segments at paragraph boundaries
+  // Build chunks from segments
   const chunks: Chunk[] = [];
 
   for (let i = 0; i < segments.length; i++) {
@@ -530,54 +530,28 @@ async function chunkVideo(
     const segContent = lines.slice(startLine, endLine).join("\n").trim();
     if (segContent.length < 50) continue;
 
-    if (segContent.length > MEDIA_SPLIT_MAX_CHUNK) {
-      // Oversized video segment → split at paragraph boundaries
-      const subSegments = splitOversizedSection(lines, startLine, endLine, MEDIA_SPLIT_MAX_CHUNK);
+    const chars = segContent.length;
+    const chunkIndex = chunks.length + 1;
 
-      for (let si = 0; si < subSegments.length; si++) {
-        const sub = subSegments[si];
-        const subContent = lines.slice(sub.startLine, sub.endLine).join("\n").trim();
-        if (subContent.length < 50) continue;
-        const chars = subContent.length;
-        const partLabel = subSegments.length > 1 ? ` (part ${si + 1}/${subSegments.length})` : "";
+    const meta: ChunkMeta = {
+      source_origin: source.sourceOrigin,
+      source_type: "videos",
+      source_duration: source.duration,
+      source_language: source.language,
+      chunk_index: chunkIndex,
+      chunk_total: 0, // filled later
+      title: seg.title,
+      summary: seg.summary,
+      chars,
+      tokens_approx: Math.round(chars / 4),
+    };
 
-        const meta: ChunkMeta = {
-          source_origin: source.sourceOrigin,
-          source_type: "videos",
-          source_duration: source.duration,
-          source_language: source.language,
-          chunk_index: chunks.length + 1,
-          chunk_total: 0,
-          title: `${seg.title}${partLabel}`,
-          summary: seg.summary,
-          chars,
-          tokens_approx: Math.round(chars / 4),
-        };
-        chunks.push({ filename: chunkFileName(baseName, chunks.length + 1), body: subContent, chars, meta });
-      }
-    } else {
-      const chars = segContent.length;
-
-      const meta: ChunkMeta = {
-        source_origin: source.sourceOrigin,
-        source_type: "videos",
-        source_duration: source.duration,
-        source_language: source.language,
-        chunk_index: chunks.length + 1,
-        chunk_total: 0,
-        title: seg.title,
-        summary: seg.summary,
-        chars,
-        tokens_approx: Math.round(chars / 4),
-      };
-
-      chunks.push({
-        filename: chunkFileName(baseName, chunks.length + 1),
-        body: segContent,
-        chars,
-        meta,
-      });
-    }
+    chunks.push({
+      filename: chunkFileName(baseName, chunkIndex),
+      body: segContent,
+      chars,
+      meta,
+    });
   }
 
   finalizeChunks(chunks);
@@ -689,14 +663,19 @@ export async function split(): Promise<void> {
           console.log(`      LLM segmentation → ~${estimatedSegments} segments (estimated, dry run)`);
           totalChunks += estimatedSegments;
         } else {
-          const { chunks, segmentCount } = await chunkVideo(file.content, file.name);
-          console.log(`      ${segmentCount} segments → ${chunks.length} chunks`);
-          printChunks(chunks, "      ");
+          try {
+            const { chunks, segmentCount } = await chunkVideo(file.content, file.name);
+            console.log(`      ${segmentCount} segments → ${chunks.length} chunks`);
+            printChunks(chunks, "      ");
 
-          for (const c of chunks) {
-            writeFileSync(join(videosChunksDir, c.filename), assembleChunk(c));
+            for (const c of chunks) {
+              writeFileSync(join(videosChunksDir, c.filename), assembleChunk(c));
+            }
+            totalChunks += chunks.length;
+          } catch (err) {
+            console.log(`      ❌ ${err instanceof Error ? err.message.slice(0, 120) : err}`);
+            if (isQuotaError(err)) { logQuotaStop("video splitting", totalSources); break; }
           }
-          totalChunks += chunks.length;
         }
         console.log();
         totalSources++;

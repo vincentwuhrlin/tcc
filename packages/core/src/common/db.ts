@@ -17,12 +17,13 @@ import { WORKSPACE } from "../config.js";
 // ── Singleton ───────────────────────────────────────────────────────
 
 let _db: Database.Database | null = null;
+let _overridePath: string | null = null;
 
 /** Get or create the database singleton. */
 export function getDb(): Database.Database {
   if (_db) return _db;
 
-  const dbPath = join(WORKSPACE, "workspace.db");
+  const dbPath = join(_overridePath ?? WORKSPACE, "workspace.db");
   const dir = dirname(dbPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
@@ -33,6 +34,23 @@ export function getDb(): Database.Database {
 
   initSchema(_db);
   return _db;
+}
+
+/** Close the database connection. Next getDb() call will reopen. */
+export function closeDb(): void {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
+}
+
+/**
+ * Reset the database path.
+ * Closes the current connection so the next getDb() opens from the new path.
+ */
+export function resetDb(basePath: string): void {
+  closeDb();
+  _overridePath = basePath;
 }
 
 // ── Schema ──────────────────────────────────────────────────────────

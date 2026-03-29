@@ -16,7 +16,7 @@ import {
   CONTEXT_DIR, printHeader,
 } from "../config.js";
 import { loadDomain } from "../common/prompts.js";
-import { llmCall } from "../common/llm.js";
+import { llmCall, isQuotaError, logQuotaStop } from "../common/llm.js";
 import { scanMarkdownFiles, parseJsonResponse, loadPlan } from "../common/media.js";
 
 // ── Frontmatter helpers ──────────────────────────────────────────────
@@ -384,6 +384,7 @@ export async function classify(): Promise<void> {
     } catch (err) {
       console.log(` ❌ ${err instanceof Error ? err.message.slice(0, 80) : err}`);
       sourceErrors++;
+      if (isQuotaError(err)) { logQuotaStop("source classification", sourceApplied); break; }
     }
   }
 
@@ -411,6 +412,8 @@ export async function classify(): Promise<void> {
 
   let chunkApplied = 0;
   let chunkErrors = 0;
+  let lastErrorMsg = "";
+  let consecutiveErrors = 0;
 
   for (let i = 0; i < toClassifyChunks.length; i++) {
     const c = toClassifyChunks[i];
@@ -441,11 +444,27 @@ export async function classify(): Promise<void> {
         ]);
         writeFileSync(c.path, `---\n${newFm}\n---\n${body}`);
         chunkApplied++;
+        consecutiveErrors = 0;
       } else {
         chunkErrors++;
+        consecutiveErrors++;
+        if (consecutiveErrors <= 3) {
+          console.log(`\n   ⚠️  [${c.name.slice(0, 50)}] invalid JSON response`);
+        }
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       chunkErrors++;
+      consecutiveErrors++;
+
+      // Log first occurrence or when message changes
+      if (msg !== lastErrorMsg || consecutiveErrors <= 3) {
+        console.log(`\n   ❌ ${msg.slice(0, 120)}`);
+        lastErrorMsg = msg;
+      }
+
+      // Stop early on quota/auth errors
+      if (isQuotaError(err)) { logQuotaStop("chunk classification", chunkApplied); break; }
     }
   }
 

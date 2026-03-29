@@ -31,10 +31,8 @@
     "media:embed:dry": "tsx src/cli.ts embed --dry-run",
     "media:embed:force": "tsx src/cli.ts embed --force",
     "media:embed:gpu": "tsx src/cli.ts embed:gpu",
-    "media:embed:gpu:cpu": "tsx src/cli.ts embed:gpu --cpu",
     "media:embed:gpu:dry": "tsx src/cli.ts embed:gpu --dry-run",
     "media:embed:gpu:keep": "tsx src/cli.ts embed:gpu --keep",
-    "media:embed:import": "tsx src/cli.ts embed:import",
     "media:embed:bench": "tsx src/cli.ts embed:bench",
     "media:embed:bench:dry": "tsx src/cli.ts embed:bench --dry-run",
     "media:embed:bench:generate": "tsx src/cli.ts embed:bench --generate",
@@ -42,7 +40,8 @@
     "bundle": "tsx src/cli.ts export",
     "bundle:dry": "tsx src/cli.ts export --dry-run",
 
-    "chat": "tsx src/cli.ts chat"
+    "chat": "tsx src/cli.ts chat",
+    "uptimize:stats": "tsx src/cli.ts uptimize:stats"
   },
   "dependencies": {
     "ai": "^4.0.0",

@@ -232,3 +232,18 @@ export function printApiConfig(): void {
     console.log(`🔗 API: ${API_BASE_URL}`);
   }
 }
+
+// ── Error detection ────────────────────────────────────────────────
+
+/** Check if an error is a quota/rate-limit error that should stop the loop. */
+export function isQuotaError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /quota|rate.limit|daily.limit/i.test(msg) || /\b(401|429)\b/.test(msg);
+}
+
+/** Log a quota error and print a restart hint. Returns true so callers can `if (logQuotaStop(...)) break;` */
+export function logQuotaStop(context: string, done: number): true {
+  console.log(`\n   🛑 API quota/rate limit reached — stopping ${context}.`);
+  console.log(`      ${done} completed. Re-run after quota reset (already processed items will be skipped).`);
+  return true;
+}

@@ -21,7 +21,7 @@ import {
   printHeader,
 } from "../config.js";
 import { buildDiscoverPrompt, fillUserMessage, loadDomain } from "../common/prompts.js";
-import { llmCall, type BatchRequest } from "../common/llm.js";
+import { llmCall, isQuotaError, logQuotaStop, type BatchRequest } from "../common/llm.js";
 import { scanMarkdownFiles, parseJsonResponse } from "../common/media.js";
 import { parseToc } from "../common/toc-parser.js";
 import { franc } from "franc-min";
@@ -647,6 +647,7 @@ export async function discover(): Promise<void> {
     } catch (err) {
       console.log(` ❌ ${err instanceof Error ? err.message.slice(0, 80) : err}`);
       errors++;
+      if (isQuotaError(err)) { logQuotaStop("discovery", applied); break; }
     }
   }
 
