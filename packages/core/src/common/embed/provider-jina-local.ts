@@ -58,7 +58,7 @@ export class LocalJinaEngine implements EmbedEngine {
   private dtype: string;
 
   constructor(dtype?: string) {
-    const resolved = dtype ?? RAG_DTYPE || DEFAULT_DTYPE;
+    const resolved = dtype ?? (RAG_DTYPE || DEFAULT_DTYPE);
     if (!VALID_DTYPES.includes(resolved)) {
       console.error(`❌ Invalid RAG_DTYPE="${resolved}" for jina-local. Valid: ${VALID_DTYPES.join(", ")}`);
       process.exit(1);
