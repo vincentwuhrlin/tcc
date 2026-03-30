@@ -33,6 +33,7 @@
     "media:embed:gpu": "tsx src/cli.ts embed:gpu",
     "media:embed:gpu:dry": "tsx src/cli.ts embed:gpu --dry-run",
     "media:embed:gpu:keep": "tsx src/cli.ts embed:gpu --keep",
+    "media:embed:import": "tsx src/cli.ts embed:import",
     "media:embed:bench": "tsx src/cli.ts embed:bench",
     "media:embed:bench:dry": "tsx src/cli.ts embed:bench --dry-run",
     "media:embed:bench:generate": "tsx src/cli.ts embed:bench --generate",
