@@ -36,6 +36,7 @@
     "media:embed:bench": "tsx src/cli.ts embed:bench",
     "media:embed:bench:dry": "tsx src/cli.ts embed:bench --dry-run",
     "media:embed:bench:generate": "tsx src/cli.ts embed:bench --generate",
+    "media:embed:stats": "tsx src/cli.ts embed:stats",
 
     "bundle": "tsx src/cli.ts export",
     "bundle:dry": "tsx src/cli.ts export --dry-run",

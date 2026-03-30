@@ -24,6 +24,7 @@ import { embed } from "./commands/embed.js";
 import { embedGpu } from "./commands/embed-gpu.js";
 import { embedImport } from "./commands/embed-import.js";
 import { embedBench } from "./commands/embed-bench.js";
+import { embedStats } from "./commands/embed-stats.js";
 
 // ── Projects commands ────────────────────────────────────────────────
 import { exportProjects } from "./commands/export.js";
@@ -63,6 +64,7 @@ const commands: Record<string, () => Promise<void>> = {
   "embed:gpu": embedGpu,
   "embed:import": embedImport,
   "embed:bench": embedBench,
+  "embed:stats": embedStats,
 
   // projects:*
   export: exportProjects,
@@ -116,6 +118,7 @@ if (!cmd || !commands[cmd]) {
   console.log("    npm run media:embed:import      Import embeddings from another db");
   console.log("    npm run media:embed:bench       Benchmark embedding engines (retrieval quality)");
   console.log("    npm run media:embed:bench:dry   Preview benchmark plan");
+  console.log("    npm run media:embed:stats       Show embedding stats per model");
   console.log();
   console.log("  Bundle (export to Claude Projects or local use):");
   console.log("    npm run bundle       Export tagged docs → project folders");
