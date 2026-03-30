@@ -31,3 +31,6 @@ $response = Invoke-WebRequest -Method Post `
 -Body '{"input": "test", "model": "nomic-embed-text-v1"}'
 
 $response.Headers
+
+
+Invoke-WebRequest -Method Post -Uri "https://api.nlp.p.uptimize.merckgroup.com/nomic/v1/embeddings" -Headers @{"api-key"=$env:UPTIMIZE_TOKEN; "Content-Type"="application/json"} -Body '{"input":"test","model":"nomic-embed-text-v1.5"}' | Select-Object StatusCode

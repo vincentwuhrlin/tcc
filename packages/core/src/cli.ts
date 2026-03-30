@@ -19,7 +19,7 @@ import { stats } from "./commands/stats.js";
 import { split, splitCheck, splitUndo } from "./commands/split.js";
 import { discover } from "./commands/discover.js";
 import { synthesize } from "./commands/synthesize.js";
-import { classify } from "./commands/classify.js";
+import { classify, classifyCheck } from "./commands/classify.js";
 import { embed } from "./commands/embed.js";
 import { embedGpu } from "./commands/embed-gpu.js";
 import { embedImport } from "./commands/embed-import.js";
@@ -58,6 +58,7 @@ const commands: Record<string, () => Promise<void>> = {
   discover,
   synthesize,
   classify,
+  "classify:check": classifyCheck,
   embed,
   "embed:gpu": embedGpu,
   "embed:import": embedImport,
@@ -76,7 +77,7 @@ const commands: Record<string, () => Promise<void>> = {
 const cmd = process.argv[2];
 
 if (!cmd || !commands[cmd]) {
-  console.log("tcc — Transcript, Classify, Chat !");
+  console.log("tcc — Transcript, Classify, Chat!");
   console.log();
   console.log("  Transcription (local tools):");
   console.log("    npm run transcript:setup        Install runpodctl, yt-dlp, ffmpeg");
@@ -104,6 +105,7 @@ if (!cmd || !commands[cmd]) {
   console.log("    npm run media:discover          1. Discover → DISCOVERY.md");
   console.log("    npm run media:synthesize        2. Synthesize → SUMMARY.md + PLAN.md");
   console.log("    npm run media:classify          3. Classify → frontmatter + INDEX.md");
+  console.log("    npm run media:classify:check    Audit classification coverage");
   console.log();
   console.log("  RAG (embedding + vector search):");
   console.log("    npm run media:embed             4. Embed chunks → workspace.db");

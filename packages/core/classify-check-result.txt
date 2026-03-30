@@ -1,0 +1,128 @@
+
+> @tcc/core@2.0.0 media:classify:check
+> tsx src/cli.ts classify:check
+
+
+ÔöîÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+Ôöé  ­ƒôé Siemens Industrial Edge (IE)
+Ôöé  Edge computing platform for industrial environments.
+Ôö£ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+Ôöé  Workspace:  C:\Users\X264750\Documents\Repositories\tcc\workspaces\industrial-edge
+Ôöé  API:        uptimize | eu.anthropic.claude-sonnet-4-6 | streaming
+Ôöé  API URL:    https://api.nlp.p.uptimize.merckgroup.com
+ÔööÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+­ƒôÜ SOURCES
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+   Total: 174
+   Ô£à Classified: 174
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+­ƒôª CHUNKS
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+   Total: 5723
+   Ô£à With inherited categories: 5723
+   Ô£à With chunk_categories: 5574
+   ÔÜá´©Å  Empty chunk_categories: 149
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+­ƒôè CATEGORY DISTRIBUTION
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+   A. Platform Overview & Ecosystem Governance
+      A.1 Platform architecture and component overview ÔÇö 17 src / 177 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      A.2 Ecosystem governance and legal framework ÔÇö 5 src / 180 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      A.3 Licensing and marketplace procurement ÔÇö 6 src / 122 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      A.4 App distribution and private marketplace ÔÇö 3 src / 24 chk ÔûêÔûêÔûê
+      A.5 Platform release notes and new features ÔÇö 16 src / 78 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 47 src / 581 chk
+
+   B. IEM Setup & Operation
+      B.1 IEM Virtual installation and configuration ÔÇö 6 src / 132 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      B.2 IEM Cloud and IEM Pro deployment ÔÇö 3 src / 105 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      B.3 Fleet management and device lifecycle ÔÇö 16 src / 211 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      B.4 App catalog and installation workflows ÔÇö 6 src / 178 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      B.5 IEM updates, backup, and maintenance ÔÇö 4 src / 165 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      B.6 User management and access control ÔÇö 2 src / 178 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 37 src / 969 chk
+
+   C. Device Onboarding & Hardware
+      C.1 SIMATIC IPC hardware specifications and installation ÔÇö 14 src / 151 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      C.2 IED-OS installation and firmware management ÔÇö 10 src / 122 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      C.3 IEVD and IECD virtual/cloud device deployment ÔÇö 5 src / 88 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      C.4 IEOD third-party hardware onboarding ÔÇö 6 src / 74 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      C.5 IEDK device builder integration ÔÇö 5 src / 287 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      C.6 IED recovery and diagnostics ÔÇö 3 src / 37 chk ÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 43 src / 759 chk
+
+   D. Network Architecture & Security
+      D.1 OT network segmentation and zone architecture ÔÇö 4 src / 267 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      D.2 Industrial Edge firewall ports and domain whitelisting ÔÇö 4 src / 132 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      D.3 Certificate management and TLS ÔÇö 1 src / 117 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      D.4 Secure remote access ÔÇö 2 src / 49 chk ÔûêÔûêÔûêÔûêÔûê
+      D.5 Defense-in-depth and cybersecurity hardening ÔÇö 7 src / 155 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      D.6 IED and IEM security hardening ÔÇö 4 src / 216 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 22 src / 936 chk
+
+   E. Data Connectors & Field Connectivity
+      E.1 SIMATIC S7 Connector ÔÇö 2 src / 146 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      E.2 S7+ Connector and Connectivity Suite gRPC ÔÇö 1 src / 23 chk ÔûêÔûêÔûê
+      E.3 OPC UA Connector ÔÇö 2 src / 124 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      E.4 EtherNet/IP Connector ÔÇö 1 src / 33 chk ÔûêÔûêÔûêÔûê
+      E.5 SINUMERIK Connector and CNC data ÔÇö 4 src / 35 chk ÔûêÔûêÔûêÔûê
+      E.6 IE Databus and MQTT broker ÔÇö 9 src / 126 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 19 src / 487 chk
+
+   F. IIH & Data Management
+      F.1 IIH architecture and component integration ÔÇö 5 src / 132 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      F.2 Asset modeling and tag configuration ÔÇö 3 src / 110 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      F.3 GraphQL and OPC UA aggregating server ÔÇö 3 src / 47 chk ÔûêÔûêÔûêÔûêÔûê
+      F.4 Northbound synchronization and cloud integration ÔÇö 6 src / 22 chk ÔûêÔûêÔûê
+      F.5 IIH Essentials performance and storage ÔÇö 1 src / 50 chk ÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 18 src / 361 chk
+
+   G. Cloud Connectivity & Data Pipelines
+      G.1 Cloud Connector and routing architecture ÔÇö 5 src / 47 chk ÔûêÔûêÔûêÔûêÔûê
+      G.2 AWS IoT Hub and SiteWise integration ÔÇö 5 src / 41 chk ÔûêÔûêÔûêÔûêÔûê
+      G.3 Azure IoT Hub integration ÔÇö 3 src / 34 chk ÔûêÔûêÔûêÔûê
+      G.4 MindSphere and Insights Hub connectivity ÔÇö 2 src / 51 chk ÔûêÔûêÔûêÔûêÔûêÔûê
+      G.5 TIA Portal Cloud Connector ÔÇö 1 src / 52 chk ÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 16 src / 225 chk
+
+   H. Virtual PLC & Software-Defined Automation
+      H.1 S7-1500V virtual PLC on Industrial Edge ÔÇö 5 src / 49 chk ÔûêÔûêÔûêÔûêÔûê
+      H.2 S7-1500 Software Controller on SIMATIC IPC ÔÇö 3 src / 164 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      H.3 Virtual network concepts for Software Controller ÔÇö 1 src / 30 chk ÔûêÔûêÔûê
+      H.4 TIA Portal integration and licensing ÔÇö 3 src / 58 chk ÔûêÔûêÔûêÔûêÔûêÔûê
+      H.5 Virtual PLC scalability and resource planning ÔÇö 2 src / 8 chk Ôûê
+      ÔöÇÔöÇ total: 14 src / 309 chk
+
+   I. App Development & Publishing
+      I.1 App development environment and Docker basics ÔÇö 5 src / 284 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      I.2 IE App Publisher and packaging workflow ÔÇö 8 src / 277 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      I.3 Edge App SDK and IIH SDK ÔÇö 3 src / 106 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      I.4 Data Service Development Kit and REST APIs ÔÇö 3 src / 20 chk ÔûêÔûê
+      I.5 IE Device and Databus APIs ÔÇö 1 src / 70 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      I.6 Marketplace publication and ecosystem review ÔÇö 4 src / 132 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 24 src / 889 chk
+
+   J. Analytics, AI/ML & Edge Applications
+      J.1 IIH-based analytics apps ÔÇö 16 src / 283 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      J.2 Anomaly detection and predictive maintenance ÔÇö 14 src / 132 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      J.3 Condition monitoring and alerting ÔÇö 7 src / 132 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      J.4 Digital twin and simulation ÔÇö 7 src / 124 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      J.5 Flow Creator and visual programming ÔÇö 7 src / 247 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      J.6 SCADA and HMI on edge ÔÇö 4 src / 320 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      J.7 AI inference and cloud-to-edge ML deployment ÔÇö 10 src / 40 chk ÔûêÔûêÔûêÔûê
+      J.8 Third-party and ecosystem apps ÔÇö 19 src / 100 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 84 src / 1378 chk
+
+   K. IT/OT Integration Patterns & Architecture
+      K.1 IT/OT reference architecture and UNS ÔÇö 6 src / 102 chk ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê
+      K.2 Data repository and deployment strategies ÔÇö 1 src / 22 chk ÔûêÔûêÔûê
+      K.3 MES, ERP, and enterprise integration ÔÇö 3 src / 20 chk ÔûêÔûê
+      K.4 NAMUR Open Architecture and process industry ÔÇö 2 src / 6 chk Ôûê
+      K.5 Use cases and customer references ÔÇö 9 src / 55 chk ÔûêÔûêÔûêÔûêÔûêÔûê
+      ÔöÇÔöÇ total: 21 src / 205 chk
+

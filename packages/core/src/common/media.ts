@@ -97,9 +97,28 @@ export function buildFrontmatter(meta: TagResult, sourceFile: string, dir: strin
 // ── JSON response parsing ───────────────────────────────────────────
 
 export function parseJsonResponse(text: string): TagResult | null {
+  // Step 1: Try direct parse after stripping markdown fences
+  const cleaned = text.replace(/^```json?\n?/m, "").replace(/\n?```$/m, "").trim();
   try {
-    return JSON.parse(text.replace(/^```json?\n?/m, "").replace(/\n?```$/m, "").trim());
-  } catch { return null; }
+    return JSON.parse(cleaned);
+  } catch { /* fall through to extraction */ }
+
+  // Step 2: Try extracting JSON from anywhere in the response
+  // Handles: "Here's the result: { ... }", "Looking at...\n{...}", etc.
+  for (const startChar of ["{", "["]) {
+    const endChar = startChar === "{" ? "}" : "]";
+    let pos = -1;
+    while ((pos = cleaned.indexOf(startChar, pos + 1)) !== -1) {
+      const lastEnd = cleaned.lastIndexOf(endChar);
+      if (lastEnd <= pos) continue;
+      const slice = cleaned.slice(pos, lastEnd + 1);
+      try {
+        return JSON.parse(slice);
+      } catch { /* try next candidate */ }
+    }
+  }
+
+  return null;
 }
 
 // ── Plan loading ────────────────────────────────────────────────────
