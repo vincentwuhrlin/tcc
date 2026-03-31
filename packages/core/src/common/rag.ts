@@ -4,9 +4,10 @@
  * Loads embeddings from SQLite into memory, computes cosine similarity
  * against a query vector, and returns the top-K most relevant chunks.
  *
- * Performance: cosine similarity on 4 360 vectors × 768 dims < 10ms.
+ * Performance: cosine similarity on 5 700 vectors × 768 dims < 15ms.
  */
 import { loadEmbeddings, type StoredEmbedding } from "./db.js";
+import { CHAT_MIN_SCORE } from "../config.js";
 
 // ── Cosine similarity ───────────────────────────────────────────────
 
@@ -51,11 +52,22 @@ export function clearIndex(): void {
   _cacheModel = null;
 }
 
+/** Return the currently loaded model name, or null. */
+export function currentModel(): string | null {
+  return _cacheModel;
+}
+
 /**
  * Search for the top-K most similar chunks to a query vector.
  * The index must be loaded first via loadIndex().
+ *
+ * Chunks with a score below `minScore` are excluded (default: CHAT_MIN_SCORE).
  */
-export function searchChunks(queryVector: number[], topK: number = 20): SearchResult[] {
+export function searchChunks(
+  queryVector: number[],
+  topK: number = 20,
+  minScore: number = CHAT_MIN_SCORE,
+): SearchResult[] {
   if (!_cache || _cache.length === 0) {
     throw new Error("No embeddings loaded. Call loadIndex() first.");
   }
@@ -68,7 +80,10 @@ export function searchChunks(queryVector: number[], topK: number = 20): SearchRe
   }));
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, topK);
+
+  return scored
+    .filter((r) => r.score >= minScore)
+    .slice(0, topK);
 }
 
 /**
@@ -80,7 +95,7 @@ export function assembleContext(results: SearchResult[], maxChars: number = 80_0
   let totalChars = 0;
 
   for (const r of results) {
-    const entry = `## [${r.source}] (score: ${r.score.toFixed(3)})\n\n${r.content}`;
+    const entry = `### [${r.source}] (relevance: ${(r.score * 100).toFixed(0)}%)\n\n${r.content}`;
     if (totalChars + entry.length > maxChars) break;
     parts.push(entry);
     totalChars += entry.length;

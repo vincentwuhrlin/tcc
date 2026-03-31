@@ -3,14 +3,14 @@
  *
  * Endpoint: https://api.nlp.p.uptimize.merckgroup.com/nomic/v1/embeddings
  * Model:    nomic-embed-text-v1 (768 dimensions, fixed)
- * Auth:     RAG_API_KEY (falls back to API_KEY if not set)
+ * Auth:     MEDIA_EMBED_API_KEY (falls back to API_KEY if not set)
  *
  * Nomic v1 does not require task prefixes (unlike v1.5),
  * so embedQuery and embedChunks behave identically.
  */
 import type { EmbedEngine, EmbedEngineInfo } from "./types.js";
 import { runConcurrent } from "./types.js";
-import { RAG_API_KEY, RAG_API_BASE_URL, RAG_BATCH_CONCURRENCY } from "../../config.js";
+import { MEDIA_EMBED_API_KEY, MEDIA_EMBED_API_BASE_URL, MEDIA_EMBED_BATCH_CONCURRENCY } from "../../config.js";
 
 const NOMIC_PATH = "/nomic/v1/embeddings";
 const MODEL = "nomic-embed-text-v1";
@@ -22,17 +22,19 @@ export class UptimizeNomicEngine implements EmbedEngine {
   private baseUrl: string;
   private apiKey: string;
 
-  constructor() {
-    if (!RAG_API_BASE_URL) {
-      console.error("❌ Set RAG_API_BASE_URL (or API_BASE_URL) in .env for uptimize embedding");
+  constructor(apiKey?: string, apiBaseUrl?: string) {
+    const resolvedUrl = apiBaseUrl ?? MEDIA_EMBED_API_BASE_URL;
+    const resolvedKey = apiKey ?? MEDIA_EMBED_API_KEY;
+    if (!resolvedUrl) {
+      console.error("❌ Set MEDIA_EMBED_API_BASE_URL (or API_BASE_URL) in .env for uptimize embedding");
       process.exit(1);
     }
-    if (!RAG_API_KEY) {
-      console.error("❌ Set RAG_API_KEY (or API_KEY) in .env");
+    if (!resolvedKey) {
+      console.error("❌ Set MEDIA_EMBED_API_KEY (or API_KEY) in .env");
       process.exit(1);
     }
-    this.baseUrl = RAG_API_BASE_URL;
-    this.apiKey = RAG_API_KEY;
+    this.baseUrl = resolvedUrl;
+    this.apiKey = resolvedKey;
   }
 
   info(): EmbedEngineInfo {
@@ -47,7 +49,7 @@ export class UptimizeNomicEngine implements EmbedEngine {
     texts: string[],
     options?: { concurrency?: number; onProgress?: (done: number, total: number) => void },
   ): Promise<number[][]> {
-    const concurrency = options?.concurrency ?? RAG_BATCH_CONCURRENCY;
+    const concurrency = options?.concurrency ?? MEDIA_EMBED_BATCH_CONCURRENCY;
     const results: number[][] = new Array(texts.length);
     let done = 0;
 

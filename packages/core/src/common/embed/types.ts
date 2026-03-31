@@ -38,7 +38,7 @@ export interface EmbedEngine {
 }
 
 export interface EmbedEngineInfo {
-  /** Provider key matching RAG_ENGINE env var */
+  /** Provider key matching MEDIA_EMBED_ENGINE env var */
   engine: string;
   /** Model identifier (e.g. "nomic-embed-text-v1") */
   model: string;

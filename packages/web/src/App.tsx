@@ -33,6 +33,21 @@ export interface ChatMessage {
   sources?: { source: string; score: number }[];
   timing?: { embed_ms: number; search_ms: number; llm_ms: number; total_ms: number };
   context?: { totalMessages: number; hasCompaction: boolean; windowSize: number };
+  debug?: DebugPayload;
+}
+
+export interface DebugPayload {
+  query: string;
+  rag: {
+    totalChunks: number;
+    returned: number;
+    topK: number;
+    minScore: number;
+    chunks: { id: string; source: string; score: number; chars: number; preview: string }[];
+  };
+  prompt: { totalChars: number; instructions: number; domain: number; plan: number; ragContext: number; history: number; summary: number };
+  session: { id: string; totalMessages: number; windowSize: number; hasCompaction: boolean; needsCompaction: boolean };
+  config: { provider: string; model: string; streaming: boolean; embedEngine: string };
 }
 
 interface WorkspaceItem {

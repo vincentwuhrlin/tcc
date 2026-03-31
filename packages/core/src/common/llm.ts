@@ -5,39 +5,72 @@
  *   - "anthropic" → Anthropic direct (streaming + batch)
  *   - "uptimize"  → UPTIMIZE Foundry (streaming only, OpenAI-compatible proxy)
  *
+ * Config scopes:
+ *   - API_* → default config, used by media pipeline commands (discover, classify, synthesize)
+ *   - CHAT_API_* → chat-specific config (falls back to API_*)
+ *   - Pass a LlmConfig to llmCall/llmStreamCall to override at call site
+ *
  * Modes (MEDIA_API_MODE):
  *   - "streaming" → one call at a time via Vercel AI SDK (works with both providers)
  *   - "batch"     → submit all at once via Anthropic Batch API (anthropic provider only, -50% cost)
  */
-import { generateText } from "ai";
+import { generateText, streamText } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
-import { API_PROVIDER, API_KEY, API_MODEL, API_BASE_URL, MEDIA_API_MODE } from "../config.js";
+import {
+  API_PROVIDER, API_KEY, API_MODEL, API_BASE_URL, MEDIA_API_MODE,
+  CHAT_API_PROVIDER, CHAT_API_KEY, CHAT_API_MODEL, CHAT_API_BASE_URL,
+  type ApiProvider,
+} from "../config.js";
+
+// ── LLM Config ──────────────────────────────────────────────────────
+
+export interface LlmConfig {
+  provider: ApiProvider;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+/** Default config for media pipeline commands. */
+export function getDefaultLlmConfig(): LlmConfig {
+  return { provider: API_PROVIDER, apiKey: API_KEY, baseUrl: API_BASE_URL, model: API_MODEL };
+}
+
+/** Chat-specific config (falls back to API_* via config.ts). */
+export function getChatLlmConfig(): LlmConfig {
+  return { provider: CHAT_API_PROVIDER, apiKey: CHAT_API_KEY, baseUrl: CHAT_API_BASE_URL, model: CHAT_API_MODEL };
+}
 
 // ── Vercel AI SDK provider ──────────────────────────────────────────
 
-function getProvider() {
-  if (!API_KEY) {
+function getProvider(config?: LlmConfig) {
+  const prov = config?.provider ?? API_PROVIDER;
+  const key = config?.apiKey ?? API_KEY;
+  const baseUrl = config?.baseUrl ?? API_BASE_URL;
+  const model = config?.model ?? API_MODEL;
+
+  if (!key) {
     console.error("❌ Set API_KEY in .env");
     process.exit(1);
   }
 
-  if (API_PROVIDER === "uptimize") {
-    if (!API_BASE_URL) {
+  if (prov === "uptimize") {
+    if (!baseUrl) {
       console.error("❌ Set API_BASE_URL in .env for uptimize provider");
       process.exit(1);
     }
 
     return createOpenAI({
-      apiKey: API_KEY,
-      baseURL: `${API_BASE_URL}/not-used`,
+      apiKey: key,
+      baseURL: `${baseUrl}/not-used`,
       fetch: async (input, init) => {
         const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
-        const model = body.model || API_MODEL;
-        const url = `${API_BASE_URL}/model/${model}/invoke`;
+        const m = body.model || model;
+        const url = `${baseUrl}/model/${m}/invoke`;
 
         const headers = new Headers(init?.headers);
-        headers.set("api-key", API_KEY);
+        headers.set("api-key", key);
         headers.set("openai-standard", "True");
         headers.set("content-type", "application/json");
         headers.delete("Authorization");
@@ -47,7 +80,7 @@ function getProvider() {
     });
   }
 
-  return createAnthropic({ apiKey: API_KEY });
+  return createAnthropic({ apiKey: key });
 }
 
 // ── Streaming call (one at a time) ──────────────────────────────────
@@ -57,9 +90,11 @@ export async function llmCall(
   systemPrompt: string,
   userMessage: string,
   maxTokens: number = 4096,
+  config?: LlmConfig,
 ): Promise<string> {
-  const provider = getProvider();
-  const model = provider(API_MODEL);
+  const cfg = config ?? getDefaultLlmConfig();
+  const provider = getProvider(cfg);
+  const model = provider(cfg.model);
 
   const { text } = await generateText({
     model,
@@ -69,6 +104,30 @@ export async function llmCall(
   });
 
   return text.trim();
+}
+
+/**
+ * Stream LLM response as an async iterable of text chunks.
+ * Each yielded string is a partial token/word from the model.
+ */
+export function llmStreamCall(
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens: number = 4096,
+  config?: LlmConfig,
+): { textStream: AsyncIterable<string> } {
+  const cfg = config ?? getDefaultLlmConfig();
+  const provider = getProvider(cfg);
+  const model = provider(cfg.model);
+
+  const result = streamText({
+    model,
+    system: systemPrompt,
+    prompt: userMessage,
+    maxTokens,
+  });
+
+  return { textStream: result.textStream };
 }
 
 // ── Batch API (Anthropic only, -50% cost) ───────────────────────────

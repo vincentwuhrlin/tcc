@@ -84,10 +84,10 @@ function truncateTitle(text: string, maxLen = 60): string {
 
 // ── Session CRUD ─────────────────────────────────────────────────────
 
-export function createSession(title?: string): Session {
+export function createSession(title?: string, existingId?: string): Session {
   ensureMigration();
   const db = getDb();
-  const id = generateId();
+  const id = existingId ?? generateId();
   const now = new Date().toISOString();
   const sessionTitle = title ?? "New conversation";
 

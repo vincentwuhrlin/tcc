@@ -9,7 +9,7 @@
  * Context:    8192 tokens
  * Tasks:      retrieval.query, retrieval.passage, separation, classification, text-matching
  *
- * Quantization controlled by RAG_DTYPE env var or constructor param:
+ * Quantization controlled by MEDIA_EMBED_DTYPE env var or constructor param:
  *   - "fp16" → half precision, ~1.1 GB (default)
  *   - "fp32" → full precision, ~2.2 GB (best quality, slowest)
  *
@@ -18,7 +18,7 @@
  * Based on: https://github.com/huggingface/transformers.js/issues/1072
  */
 import type { EmbedEngine, EmbedEngineInfo } from "./types.js";
-import { RAG_DTYPE } from "../../config.js";
+import { MEDIA_EMBED_DTYPE } from "../../config.js";
 
 const MODEL_ID = "jinaai/jina-embeddings-v3";
 const DIMENSIONS = 1024;
@@ -58,9 +58,9 @@ export class LocalJinaEngine implements EmbedEngine {
   private dtype: string;
 
   constructor(dtype?: string) {
-    const resolved = dtype ?? (RAG_DTYPE || DEFAULT_DTYPE);
+    const resolved = dtype ?? (MEDIA_EMBED_DTYPE || DEFAULT_DTYPE);
     if (!VALID_DTYPES.includes(resolved)) {
-      console.error(`❌ Invalid RAG_DTYPE="${resolved}" for jina-local. Valid: ${VALID_DTYPES.join(", ")}`);
+      console.error(`❌ Invalid MEDIA_EMBED_DTYPE="${resolved}" for jina-local. Valid: ${VALID_DTYPES.join(", ")}`);
       process.exit(1);
     }
     this.dtype = resolved;

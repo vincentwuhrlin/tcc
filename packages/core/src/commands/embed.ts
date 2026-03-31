@@ -2,7 +2,7 @@
  * embed — Generate embeddings for all chunks and store in SQLite.
  *
  * Scans OUTPUT_DIR/{documents,videos}/chunks/*.md, strips frontmatter,
- * embeds the body text via the configured RAG_ENGINE, and upserts
+ * embeds the body text via the configured MEDIA_EMBED_ENGINE, and upserts
  * the vector into workspace.db.
  *
  * Features:
@@ -21,7 +21,7 @@
  */
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { join, relative } from "path";
-import { OUTPUT_DIR, printHeader, RAG_BATCH_SIZE, RAG_BATCH_CONCURRENCY, RAG_API_BASE_URL } from "../config.js";
+import { OUTPUT_DIR, printHeader, MEDIA_EMBED_BATCH_SIZE, MEDIA_EMBED_BATCH_CONCURRENCY, MEDIA_EMBED_API_BASE_URL } from "../config.js";
 import { getEmbedEngine } from "../common/embed/index.js";
 import { upsertEmbedding, getEmbeddingIds, countEmbeddings, getDbStats } from "../common/db.js";
 import { stripFrontmatter } from "../common/media.js";
@@ -78,10 +78,10 @@ export async function embed(): Promise<void> {
   console.log(`   Engine:     ${engineName}`);
   console.log(`   Model:      ${model} (${dimensions}d)`);
   if (mode === "api") {
-    console.log(`   API URL:    ${RAG_API_BASE_URL}`);
-    console.log(`   Concurrency: ${RAG_BATCH_CONCURRENCY} parallel requests`);
+    console.log(`   API URL:    ${MEDIA_EMBED_API_BASE_URL}`);
+    console.log(`   Concurrency: ${MEDIA_EMBED_BATCH_CONCURRENCY} parallel requests`);
   }
-  console.log(`   Batch size: ${RAG_BATCH_SIZE}`);
+  console.log(`   Batch size: ${MEDIA_EMBED_BATCH_SIZE}`);
   console.log();
 
   // 2. Scan chunks
@@ -128,8 +128,8 @@ export async function embed(): Promise<void> {
   let done = 0;
   let errors = 0;
 
-  for (let i = 0; i < toEmbed.length; i += RAG_BATCH_SIZE) {
-    const batch = toEmbed.slice(i, i + RAG_BATCH_SIZE);
+  for (let i = 0; i < toEmbed.length; i += MEDIA_EMBED_BATCH_SIZE) {
+    const batch = toEmbed.slice(i, i + MEDIA_EMBED_BATCH_SIZE);
 
     // Read and strip frontmatter for each chunk in the batch
     const texts = batch.map((c) => {

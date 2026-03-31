@@ -4,7 +4,7 @@
  * Manages the lifecycle of switching between workspaces:
  *   1. Close current DB connection
  *   2. Point DB to new workspace path
- *   3. Reload PLAN.md + INDEX.md
+ *   3. Reload instructions.md + domain.md + PLAN.md headers
  *   4. Reload RAG index from new workspace.db
  *   5. Persist selection in .tcc-state.json
  *   6. Return updated workspace info + stats
@@ -14,7 +14,7 @@ import { join, resolve } from "path";
 import { MONOREPO_ROOT } from "./env.js";
 import { resetDb } from "@tcc/core/src/common/db.js";
 import { clearIndex, loadIndex } from "@tcc/core/src/common/rag.js";
-import { getEmbedEngine } from "@tcc/core/src/common/embed/index.js";
+import { getChatEmbedEngine } from "@tcc/core/src/common/embed/index.js";
 import { loadWorkspace, scanAllWorkspaces, type WorkspaceInfo } from "./workspace.js";
 import { getActiveWorkspaceName, setActiveWorkspace } from "./state.js";
 
@@ -22,8 +22,9 @@ import { getActiveWorkspaceName, setActiveWorkspace } from "./state.js";
 
 let _current: WorkspaceInfo;
 let _allWorkspaces: WorkspaceInfo[];
-let _planContent = "";
-let _indexContent = "";
+let _instructionsContent = "";
+let _domainContent = "";
+let _planHeaders = "";
 let _ragReady = false;
 let _ragChunkCount = 0;
 
@@ -31,8 +32,9 @@ let _ragChunkCount = 0;
 
 export function currentWorkspace(): WorkspaceInfo { return _current; }
 export function allWorkspaces(): WorkspaceInfo[] { return _allWorkspaces; }
-export function planContent(): string { return _planContent; }
-export function indexContent(): string { return _indexContent; }
+export function instructionsContent(): string { return _instructionsContent; }
+export function domainContent(): string { return _domainContent; }
+export function planHeaders(): string { return _planHeaders; }
 export function ragReady(): boolean { return _ragReady; }
 export function ragChunkCount(): number { return _ragChunkCount; }
 
@@ -43,33 +45,62 @@ function resolveWorkspacePath(workspaceId: string): string {
   return join(wsDir, workspaceId);
 }
 
-// ── Load PLAN.md + INDEX.md ─────────────────────────────────────────
+// ── Extract PLAN.md headers only ────────────────────────────────────
+// Keeps ## and ### headings (categories + subcategories) as a compact
+// table of contents. Drops body text to save tokens.
+
+function extractPlanHeaders(planContent: string): string {
+  const lines = planContent.split("\n");
+  const headers: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Match ## A. Category or ### A.1 Subcategory
+    if (/^#{2,3}\s+[A-Z][\.\d]*/.test(trimmed)) {
+      const depth = trimmed.startsWith("### ") ? "  " : "";
+      const text = trimmed.replace(/^#{2,3}\s+/, "");
+      headers.push(`${depth}${text}`);
+    }
+  }
+
+  return headers.join("\n");
+}
+
+// ── Load context files ──────────────────────────────────────────────
 
 function loadContextFiles(wsPath: string): void {
   const outputDir = join(wsPath, "media", "output");
 
-  // PLAN.md
-  const planPath = join(outputDir, "PLAN.md");
-  if (existsSync(planPath)) {
-    _planContent = readFileSync(planPath, "utf-8");
-    console.log(`  📋 PLAN.md loaded (${Math.round(_planContent.length / 1000)}k chars)`);
+  // instructions.md — chat behavior rules (audience, citations, language)
+  const instructionsPath = join(wsPath, "context", "chat", "instructions.md");
+  if (existsSync(instructionsPath)) {
+    _instructionsContent = readFileSync(instructionsPath, "utf-8");
+    console.log(`  📜 instructions.md loaded (${Math.round(_instructionsContent.length / 1000)}k chars)`);
   } else {
-    _planContent = "";
-    console.log(`  📋 PLAN.md not found`);
+    _instructionsContent = "";
+    console.log(`  📜 instructions.md not found (context/chat/instructions.md)`);
   }
 
-  // INDEX.md (truncate if too large)
-  const indexPath = join(outputDir, "INDEX.md");
-  if (existsSync(indexPath)) {
-    const raw = readFileSync(indexPath, "utf-8");
-    const maxChars = 60_000;
-    _indexContent = raw.length > maxChars
-      ? raw.slice(0, maxChars) + `\n\n[... INDEX.md truncated ...]`
-      : raw;
-    console.log(`  📑 INDEX.md loaded (${Math.round(raw.length / 1000)}k chars)`);
+  // domain.md — domain knowledge, vocabulary, team context
+  const domainPath = join(wsPath, "context", "shared", "domain.md");
+  if (existsSync(domainPath)) {
+    _domainContent = readFileSync(domainPath, "utf-8");
+    console.log(`  🌐 domain.md loaded (${Math.round(_domainContent.length / 1000)}k chars)`);
   } else {
-    _indexContent = "";
-    console.log(`  📑 INDEX.md not found`);
+    _domainContent = "";
+    console.log(`  🌐 domain.md not found`);
+  }
+
+  // PLAN.md — extract headers only (compact category map)
+  const planPath = join(outputDir, "PLAN.md");
+  if (existsSync(planPath)) {
+    const raw = readFileSync(planPath, "utf-8");
+    _planHeaders = extractPlanHeaders(raw);
+    const catCount = _planHeaders.split("\n").filter((l) => !l.startsWith("  ")).length;
+    console.log(`  📋 PLAN.md → ${catCount} categories extracted (headers only)`);
+  } else {
+    _planHeaders = "";
+    console.log(`  📋 PLAN.md not found`);
   }
 }
 
@@ -78,7 +109,7 @@ function loadContextFiles(wsPath: string): void {
 async function loadRagIndex(): Promise<void> {
   try {
     clearIndex();
-    const engine = await getEmbedEngine();
+    const engine = await getChatEmbedEngine();
     const info = engine.info();
     _ragChunkCount = loadIndex(info.model);
     _ragReady = _ragChunkCount > 0;

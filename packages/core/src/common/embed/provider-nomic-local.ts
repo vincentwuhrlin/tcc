@@ -8,7 +8,7 @@
  * Dimensions: 768 (full matryoshka)
  * Context:    8192 tokens
  *
- * Quantization controlled by RAG_DTYPE env var or constructor param:
+ * Quantization controlled by MEDIA_EMBED_DTYPE env var or constructor param:
  *   - "q8"   → int8 quantized, ~137 MB (default, fastest)
  *   - "fp16" → half precision, ~274 MB
  *   - "fp32" → full precision, ~547 MB (best quality, slowest)
@@ -21,7 +21,7 @@
  *   - embedQuery:  "search_query: <text>"
  */
 import type { EmbedEngine, EmbedEngineInfo } from "./types.js";
-import { RAG_DTYPE } from "../../config.js";
+import { MEDIA_EMBED_DTYPE } from "../../config.js";
 
 const MODEL_ID = "nomic-ai/nomic-embed-text-v1.5";
 const DIMENSIONS = 768;
@@ -61,9 +61,9 @@ export class LocalNomicEngine implements EmbedEngine {
   private dtype: string;
 
   constructor(dtype?: string) {
-    const resolved = dtype ?? (RAG_DTYPE || DEFAULT_DTYPE);
+    const resolved = dtype ?? (MEDIA_EMBED_DTYPE || DEFAULT_DTYPE);
     if (!VALID_DTYPES.includes(resolved)) {
-      console.error(`❌ Invalid RAG_DTYPE="${resolved}" for nomic-local. Valid: ${VALID_DTYPES.join(", ")}`);
+      console.error(`❌ Invalid MEDIA_EMBED_DTYPE="${resolved}" for nomic-local. Valid: ${VALID_DTYPES.join(", ")}`);
       process.exit(1);
     }
     this.dtype = resolved;

@@ -167,23 +167,46 @@ export const PLAN_FILE = resolvePath(process.env.PLAN_FILE ?? join(OUTPUT_DIR, "
 // ── Split (RAG chunking) ────────────────────────────────────────────
 export const MEDIA_SPLIT_MAX_CHUNK = parseInt(process.env.MEDIA_SPLIT_MAX_CHUNK ?? "6000", 10);
 
-// ── RAG (embedding + vector search) ────────────────────────────────
-// RAG credentials are independent from LLM credentials.
+// ── Embedding (media:embed) ────────────────────────────────────────
+// Credentials for corpus embedding. Independent from LLM credentials.
 // Falls back to API_KEY / API_BASE_URL if not set explicitly.
-// This lets you use e.g. personal Anthropic for LLM + corporate UPTIMIZE for embed.
-export type RagEngineType = "nomic-uptimize" | "nomic-local" | "jina-local";
-export const RAG_ENGINE = (process.env.RAG_ENGINE ?? "nomic-uptimize") as RagEngineType;
-export const RAG_API_KEY = process.env.RAG_API_KEY ?? API_KEY;
-export const RAG_API_BASE_URL = process.env.RAG_API_BASE_URL ?? API_BASE_URL;
-export const RAG_BATCH_SIZE = parseInt(process.env.RAG_BATCH_SIZE ?? "10", 10);
-export const RAG_BATCH_CONCURRENCY = parseInt(process.env.RAG_BATCH_CONCURRENCY ?? "5", 10);
-export const RAG_TOP_K = parseInt(process.env.RAG_TOP_K ?? "20", 10);
+export type EmbedEngineType = "nomic-uptimize" | "nomic-local" | "jina-local";
+export const MEDIA_EMBED_ENGINE = (process.env.MEDIA_EMBED_ENGINE ?? "nomic-uptimize") as EmbedEngineType;
+export const MEDIA_EMBED_API_KEY = process.env.MEDIA_EMBED_API_KEY ?? API_KEY;
+export const MEDIA_EMBED_API_BASE_URL = process.env.MEDIA_EMBED_API_BASE_URL ?? API_BASE_URL;
+export const MEDIA_EMBED_BATCH_SIZE = parseInt(process.env.MEDIA_EMBED_BATCH_SIZE ?? "10", 10);
+export const MEDIA_EMBED_BATCH_CONCURRENCY = parseInt(process.env.MEDIA_EMBED_BATCH_CONCURRENCY ?? "5", 10);
 
 // Quantization for local embedding models.
 // Values: "q8" (int8, smallest/fastest), "fp16" (half precision), "fp32" (full precision)
-// Default varies per provider: nomic-local="q8", jina-local="fp16"
 // Stored in model name in DB so different dtypes coexist: e.g. "nomic-embed-text-v1.5-fp16"
-export const RAG_DTYPE = process.env.RAG_DTYPE ?? "";
+export const MEDIA_EMBED_DTYPE = process.env.MEDIA_EMBED_DTYPE ?? "";
+
+// ── Chat ───────────────────────────────────────────────────────────
+// Chat has its own LLM + embed config, both falling back to defaults.
+// This lets you use e.g. a faster/cheaper model for interactive chat
+// while keeping a more powerful model for media pipeline commands.
+
+// Chat LLM (fallback → API_*)
+export const CHAT_API_PROVIDER = (process.env.CHAT_API_PROVIDER ?? API_PROVIDER) as ApiProvider;
+export const CHAT_API_KEY = process.env.CHAT_API_KEY ?? API_KEY;
+export const CHAT_API_BASE_URL = process.env.CHAT_API_BASE_URL ?? API_BASE_URL;
+export const CHAT_API_MODEL = process.env.CHAT_API_MODEL ?? API_MODEL;
+// LLM streaming: true = stream tokens from LLM API (requires provider support).
+// false = wait for full response, then send via SSE in one shot.
+// Either way the frontend uses SSE — this only controls the LLM ↔ server leg.
+export const CHAT_API_STREAMING = (process.env.CHAT_API_STREAMING ?? "true") === "true";
+
+// Chat embedding (fallback → MEDIA_EMBED_*)
+// ⚠️ CHAT_EMBED model must produce vectors compatible with the corpus embeddings in DB.
+export const CHAT_EMBED_ENGINE = (process.env.CHAT_EMBED_ENGINE ?? MEDIA_EMBED_ENGINE) as EmbedEngineType;
+export const CHAT_EMBED_DTYPE = process.env.CHAT_EMBED_DTYPE ?? MEDIA_EMBED_DTYPE;
+export const CHAT_EMBED_API_KEY = process.env.CHAT_EMBED_API_KEY ?? MEDIA_EMBED_API_KEY;
+export const CHAT_EMBED_API_BASE_URL = process.env.CHAT_EMBED_API_BASE_URL ?? MEDIA_EMBED_API_BASE_URL;
+
+// Chat search
+export const CHAT_TOP_K = parseInt(process.env.CHAT_TOP_K ?? "20", 10);
+export const CHAT_MIN_SCORE = parseFloat(process.env.CHAT_MIN_SCORE ?? "0.3");
 
 // ── Projects (Claude Projects export) ───────────────────────────────
 export const BUNDLES_FILE = resolvePath(process.env.BUNDLES_FILE ?? join(BUNDLES_DIR, "bundles.json"));

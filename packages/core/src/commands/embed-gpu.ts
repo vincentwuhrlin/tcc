@@ -11,7 +11,7 @@
  *   7. Terminate pod (unless --keep)
  *
  * Flags:
- *   --engine=jina-local|nomic-local   Override RAG_ENGINE (default: nomic-local)
+ *   --engine=jina-local|nomic-local   Override MEDIA_EMBED_ENGINE (default: nomic-local)
  *   --cpu                             Use CPU pod instead of GPU (cheaper for ONNX)
  *   --cpu-flavor=cpu3c|cpu5c          CPU flavor (default: cpu5c = 5+ GHz)
  *   --cpu-vcpus=N                     Number of vCPUs (default: 4)
@@ -37,7 +37,7 @@ import {
   WORKSPACES_DIR,
   WORKSPACE_NAME,
   OUTPUT_DIR,
-  RAG_ENGINE,
+  MEDIA_EMBED_ENGINE,
   printHeader,
 } from "../config.js";
 import { createPod, getPods } from "../runpod.js";
@@ -210,7 +210,7 @@ function generateRemoteEnv(engine: string): string {
   const overrideKeys = [
     "WORKSPACES_DIR",
     "WORKSPACE",
-    "RAG_ENGINE",
+    "MEDIA_EMBED_ENGINE",
   ];
 
   const lines = envContent.split("\n").filter((line) => {
@@ -223,7 +223,7 @@ function generateRemoteEnv(engine: string): string {
   lines.push("# ── GPU embed overrides (auto-generated) ─────────────────────");
   lines.push(`WORKSPACES_DIR=/root`);
   lines.push(`WORKSPACE=workspace`);
-  lines.push(`RAG_ENGINE=${engine}`);
+  lines.push(`MEDIA_EMBED_ENGINE=${engine}`);
   lines.push("");
 
   return lines.join("\n");
@@ -477,7 +477,7 @@ export async function embedGpu(): Promise<void> {
     scp(sshInfo.ip, sshInfo.port, localEnvTmp, `${REMOTE_PROJECT}/.env`);
     // Clean up local tmp
     try { unlinkSync(localEnvTmp); } catch {}
-    console.log(`   ✅ .env generated with RAG_ENGINE=${flags.engine}`);
+    console.log(`   ✅ .env generated with MEDIA_EMBED_ENGINE=${flags.engine}`);
 
     // ══════════════════════════════════════════════════════════════════
     //  STEP 6 — Install deps + run embed

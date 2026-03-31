@@ -27,7 +27,7 @@ import { join } from "path";
 import ExcelJS from "exceljs";
 import {
   WORKSPACE, OUTPUT_DIR, printHeader,
-  type RagEngineType,
+  type EmbedEngineType,
 } from "../config.js";
 import { llmCall, isQuotaError, logQuotaStop } from "../common/llm.js";
 import { getDb, loadEmbeddings, type StoredEmbedding } from "../common/db.js";
@@ -121,7 +121,7 @@ function parseArgs() {
     hardCount: parseInt(args.find((a) => a.startsWith("--hard-count="))?.split("=")[1] ?? "100", 10),
     hardClusters: parseInt(args.find((a) => a.startsWith("--hard-clusters="))?.split("=")[1] ?? "30", 10),
     engines: args.find((a) => a.startsWith("--engines="))?.split("=")[1]
-      ?.split(/[,\s]+/).map((e) => e.trim()).filter(Boolean) as RagEngineType[] | undefined ?? null,
+      ?.split(/[,\s]+/).map((e) => e.trim()).filter(Boolean) as EmbedEngineType[] | undefined ?? null,
     topK: args.find((a) => a.startsWith("--top-k="))?.split("=")[1]
       ?.split(/[,\s]+/).map((k) => parseInt(k.trim(), 10)).filter(Boolean) ?? DEFAULT_K_VALUES,
   };
@@ -129,7 +129,7 @@ function parseArgs() {
 
 // ── Engine factory (bypasses singleton) ──────────────────────────────
 
-async function createEngine(name: RagEngineType, dtype?: string): Promise<EmbedEngine> {
+async function createEngine(name: EmbedEngineType, dtype?: string): Promise<EmbedEngine> {
   switch (name) {
     case "nomic-uptimize": {
       const { UptimizeNomicEngine } = await import("../common/embed/provider-nomic-uptimize.js");
@@ -151,14 +151,14 @@ async function createEngine(name: RagEngineType, dtype?: string): Promise<EmbedE
 // ── Detect available engines from DB ─────────────────────────────────
 
 /** Model prefix → engine type mapping. Handles both old and new model names. */
-const MODEL_PREFIXES: { prefix: string; engine: RagEngineType }[] = [
+const MODEL_PREFIXES: { prefix: string; engine: EmbedEngineType }[] = [
   { prefix: "nomic-embed-text-v1.5", engine: "nomic-local" },   // must be before v1
   { prefix: "nomic-embed-text-v1",   engine: "nomic-uptimize" },
   { prefix: "jina-embeddings-v3",    engine: "jina-local" },
 ];
 
 interface DetectedEngine {
-  engine: RagEngineType;
+  engine: EmbedEngineType;
   model: string;
   dtype: string | null;  // null for API engines (no dtype)
   count: number;
