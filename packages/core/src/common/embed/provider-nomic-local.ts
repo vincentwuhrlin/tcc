@@ -95,17 +95,32 @@ export class LocalNomicEngine implements EmbedEngine {
   }
 
   private async run(prefixedText: string): Promise<number[]> {
-    // Truncate long texts to avoid ONNX rotary embedding bugs in fp16/fp32
-    // with certain sequence lengths (off-by-one in rotary position embeddings).
-    // Crashes observed at 2048+ tokens. Dense content (BIOS tables, hex codes)
-    // can tokenize at ~2 chars/token, so 3500 chars ≈ 1750 tokens worst case.
+    const extractor = await getPipeline(this.dtype);
+
+    // ONNX rotary embedding has an off-by-one bug at certain sequence lengths
+    // in fp16/fp32. Strategy: start with full text (capped at safe max),
+    // if it crashes, progressively truncate and retry.
     const MAX_INPUT_CHARS = 3500;
-    const safeText = prefixedText.length > MAX_INPUT_CHARS
+    const TRUNCATE_STEP = 200;
+    const MAX_RETRIES = 5;
+
+    let text = prefixedText.length > MAX_INPUT_CHARS
       ? prefixedText.slice(0, MAX_INPUT_CHARS)
       : prefixedText;
 
-    const extractor = await getPipeline(this.dtype);
-    const output = await extractor(safeText, { pooling: "mean", normalize: true });
-    return Array.from(output.data).slice(0, DIMENSIONS) as number[];
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const output = await extractor(text, { pooling: "mean", normalize: true });
+        return Array.from(output.data).slice(0, DIMENSIONS) as number[];
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isRotaryBug = msg.includes("rotary_emb") || msg.includes("Shape mismatch") || msg.includes("broadcast");
+        if (!isRotaryBug || attempt === MAX_RETRIES) throw err;
+        // Truncate and retry
+        text = text.slice(0, text.length - TRUNCATE_STEP);
+      }
+    }
+
+    throw new Error("Unreachable");
   }
 }

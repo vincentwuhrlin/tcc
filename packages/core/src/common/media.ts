@@ -96,15 +96,39 @@ export function buildFrontmatter(meta: TagResult, sourceFile: string, dir: strin
 
 // ── JSON response parsing ───────────────────────────────────────────
 
+/**
+ * Repair common LLM JSON mistakes before parsing:
+ * - Trailing commas:  {"a": 1, "b": 2,}  →  {"a": 1, "b": 2}
+ * - Single-line comments:  // this is a comment
+ * - Unescaped newlines inside strings
+ */
+function repairJson(raw: string): string {
+  return raw
+    .replace(/\/\/[^\n]*/g, "")                   // strip // comments
+    .replace(/,\s*([\]}])/g, "$1")                 // trailing commas
+    .replace(/\n/g, (m, offset, str) => {          // newlines inside strings → \\n
+      // Count unescaped quotes before this position — if odd, we're inside a string
+      const before = str.slice(0, offset);
+      const quotes = (before.match(/(?<!\\)"/g) || []).length;
+      return quotes % 2 === 1 ? "\\n" : m;
+    });
+}
+
 export function parseJsonResponse(text: string): TagResult | null {
-  // Step 1: Try direct parse after stripping markdown fences
-  const cleaned = text.replace(/^```json?\n?/m, "").replace(/\n?```$/m, "").trim();
+  // Step 1: Strip markdown fences
+  const cleaned = text.replace(/```json?\s*/g, "").replace(/```\s*/g, "").trim();
+
+  // Step 2: Try direct parse (fast path)
   try {
     return JSON.parse(cleaned);
-  } catch { /* fall through to extraction */ }
+  } catch { /* fall through */ }
 
-  // Step 2: Try extracting JSON from anywhere in the response
-  // Handles: "Here's the result: { ... }", "Looking at...\n{...}", etc.
+  // Step 3: Try with JSON repair
+  try {
+    return JSON.parse(repairJson(cleaned));
+  } catch { /* fall through */ }
+
+  // Step 4: Extract JSON from anywhere in the response + repair
   for (const startChar of ["{", "["]) {
     const endChar = startChar === "{" ? "}" : "]";
     let pos = -1;
@@ -114,10 +138,15 @@ export function parseJsonResponse(text: string): TagResult | null {
       const slice = cleaned.slice(pos, lastEnd + 1);
       try {
         return JSON.parse(slice);
+      } catch { /* try repaired */ }
+      try {
+        return JSON.parse(repairJson(slice));
       } catch { /* try next candidate */ }
     }
   }
 
+  // Log snippet for debugging
+  console.log(`      💬 Raw response (first 200 chars): ${cleaned.slice(0, 200)}`);
   return null;
 }
 

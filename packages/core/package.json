@@ -16,6 +16,8 @@
     "gpu:stop": "tsx src/cli.ts stop",
     "gpu:terminate": "tsx src/cli.ts terminate",
     "media:stats": "tsx src/cli.ts stats",
+    "media:frontmatter:strip": "tsx src/cli.ts frontmatter:strip",
+    "media:frontmatter:strip:dry": "tsx src/cli.ts frontmatter:strip --dry-run",
     "media:discover": "tsx src/cli.ts discover",
     "media:discover:force": "tsx src/cli.ts discover --force",
     "media:synthesize": "tsx src/cli.ts synthesize",
@@ -26,7 +28,6 @@
     "media:classify": "tsx src/cli.ts classify",
     "media:classify:force": "tsx src/cli.ts classify --force",
     "media:classify:check": "tsx src/cli.ts classify:check",
-
     "media:embed": "tsx src/cli.ts embed",
     "media:embed:dry": "tsx src/cli.ts embed --dry-run",
     "media:embed:force": "tsx src/cli.ts embed --force",

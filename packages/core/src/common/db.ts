@@ -33,6 +33,7 @@ export function getDb(): Database.Database {
   _db.pragma("foreign_keys = ON");
 
   initSchema(_db);
+  migrateSchema(_db);
   return _db;
 }
 
@@ -74,6 +75,7 @@ function initSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS sessions (
       id          TEXT PRIMARY KEY,
       title       TEXT,
+      summary     TEXT DEFAULT '',
       created_at  TEXT DEFAULT (datetime('now')),
       updated_at  TEXT DEFAULT (datetime('now'))
     );
@@ -89,6 +91,16 @@ function initSchema(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
   `);
+}
+
+// ── Migrations ─────────────────────────────────────────────────────
+// Auto-fix existing databases that were created with older schemas.
+
+function migrateSchema(db: Database.Database): void {
+  const cols = (db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("summary")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''");
+  }
 }
 
 // ── Vector serialization ────────────────────────────────────────────

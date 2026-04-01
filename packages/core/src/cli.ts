@@ -20,6 +20,7 @@ import { split, splitCheck, splitUndo } from "./commands/split.js";
 import { discover } from "./commands/discover.js";
 import { synthesize } from "./commands/synthesize.js";
 import { classify, classifyCheck } from "./commands/classify.js";
+import { frontmatterStrip } from "./commands/frontmatter-strip.js";
 import { embed } from "./commands/embed.js";
 import { embedGpu } from "./commands/embed-gpu.js";
 import { embedImport } from "./commands/embed-import.js";
@@ -60,6 +61,7 @@ const commands: Record<string, () => Promise<void>> = {
   synthesize,
   classify,
   "classify:check": classifyCheck,
+  "frontmatter:strip": frontmatterStrip,
   embed,
   "embed:gpu": embedGpu,
   "embed:import": embedImport,
@@ -108,6 +110,8 @@ if (!cmd || !commands[cmd]) {
   console.log("    npm run media:synthesize        2. Synthesize → SUMMARY.md + PLAN.md");
   console.log("    npm run media:classify          3. Classify → frontmatter + INDEX.md");
   console.log("    npm run media:classify:check    Audit classification coverage");
+  console.log("    npm run media:frontmatter:strip        Strip all frontmatter from .md files");
+  console.log("    npm run media:frontmatter:strip:dry    Preview frontmatter removal");
   console.log();
   console.log("  RAG (embedding + vector search):");
   console.log("    npm run media:embed             4. Embed chunks → workspace.db");
