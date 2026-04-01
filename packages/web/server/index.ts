@@ -14,9 +14,12 @@ import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
 
 import { API_PROVIDER, API_MODEL, CHAT_EMBED_ENGINE, CHAT_TOP_K, CHAT_MIN_SCORE, CHAT_API_STREAMING, CHAT_API_PROVIDER, CHAT_API_MODEL } from "@tcc/core/src/config.js";
-import { getChatEmbedEngine } from "@tcc/core/src/common/embed/index.js";
+import { getChatEmbedEngine, getMediaEmbedEngine } from "@tcc/core/src/common/embed/index.js";
 import { searchChunks, assembleContext, type SearchResult } from "@tcc/core/src/common/rag.js";
+import { upsertEmbedding } from "@tcc/core/src/common/db.js";
 import { llmCall, llmStreamCall, getChatLlmConfig } from "@tcc/core/src/common/llm.js";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { join } from "path";
 
 import * as wm from "./workspace-manager.js";
 import {
@@ -333,6 +336,143 @@ app.post("/api/chat", async (c) => {
   });
 });
 
+// ── QA Tagging ─────────────────────────────────────────────────────
+
+/** Return PLAN.md categories for the QA modal dropdown. */
+app.get("/api/qa/categories", (c) => {
+  const headers = wm.planHeaders();
+  if (!headers) return c.json({ categories: [] });
+
+  // Parse "A. Category Name" lines (not indented subcategories)
+  const categories = headers
+    .split("\n")
+    .filter((l) => !l.startsWith("  ") && l.trim())
+    .map((l) => l.trim());
+
+  return c.json({ categories });
+});
+
+/** LLM-generate title + category + condensed version for a QA pair. */
+app.post("/api/qa/prepare", async (c) => {
+  const { question, answer } = await c.req.json<{ question: string; answer: string }>();
+
+  if (!question?.trim() || !answer?.trim()) {
+    return c.json({ error: "question and answer are required" }, 400);
+  }
+
+  const categories = wm.planHeaders()
+    .split("\n")
+    .filter((l) => !l.startsWith("  ") && l.trim())
+    .map((l) => l.trim());
+
+  const systemPrompt = `You are a knowledge base curator. Given a Q&A exchange, produce a JSON object with:
+- "title": a concise descriptive title (30–80 chars, in the language of the content)
+- "category": the best matching category from the list below (exact string), or "Uncategorized" if none fits
+- "condensed": a condensed version of the Q+A optimized for semantic search (150–250 tokens max, same language as content). Format: "Q: <short question>\\nA: <key points of the answer>". Keep technical terms, drop filler.
+
+Available categories:
+${categories.map((c) => `- ${c}`).join("\n")}
+
+Respond ONLY with valid JSON, no markdown fences, no preamble.`;
+
+  const userMsg = `## Question\n${question}\n\n## Answer\n${answer}`;
+
+  try {
+    const raw = await llmCall(systemPrompt, userMsg, 1024, getChatLlmConfig());
+    const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const result = JSON.parse(cleaned) as { title: string; category: string; condensed: string };
+
+    return c.json({
+      title: result.title,
+      category: result.category,
+      condensed: result.condensed,
+      categories,
+    });
+  } catch (err) {
+    console.error("❌ QA prepare failed:", err);
+    return c.json({ error: `LLM call failed: ${err instanceof Error ? err.message : err}` }, 500);
+  }
+});
+
+/** Save a QA document: write file → embed condensed → upsert → reload index. */
+app.post("/api/qa/save", async (c) => {
+  const { question, answer, title, category, condensed, sessionId } =
+    await c.req.json<{
+      question: string; answer: string; title: string;
+      category: string; condensed: string; sessionId?: string;
+    }>();
+
+  if (!question?.trim() || !answer?.trim() || !title?.trim() || !condensed?.trim()) {
+    return c.json({ error: "question, answer, title, and condensed are required" }, 400);
+  }
+
+  const wsPath = wm.currentWorkspacePath();
+  const qaDir = join(wsPath, "qa");
+
+  // Ensure qa/ directory exists
+  if (!existsSync(qaDir)) {
+    mkdirSync(qaDir, { recursive: true });
+  }
+
+  // Generate slug from title
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\u00C0-\u024F]+/gi, "_") // keep accented chars
+    .replace(/^_|_$/g, "")
+    .slice(0, 80);
+  const id = `QA__${slug}`;
+  const filename = `${id}.md`;
+  const filepath = join(qaDir, filename);
+
+  // Build the markdown file with YAML frontmatter
+  const now = new Date().toISOString();
+  const fileContent = `---
+title: "${title.replace(/"/g, '\\"')}"
+category: "${category}"
+source_type: qa
+session_id: "${sessionId ?? "unknown"}"
+created_at: "${now}"
+condensed: |
+  ${condensed.split("\n").join("\n  ")}
+---
+
+## Question
+
+${question}
+
+## Answer
+
+${answer}
+`;
+
+  try {
+    // 1. Write file
+    writeFileSync(filepath, fileContent, "utf-8");
+    console.log(`  🏷️  QA saved: ${filename}`);
+
+    // 2. Embed the condensed version
+    const engine = await getMediaEmbedEngine();
+    const info = engine.info();
+    const [vector] = await engine.embedChunks([condensed]);
+
+    // 3. Upsert into DB (content = full Q+A for RAG context injection)
+    const fullContent = `Q: ${question}\n\nA: ${answer}`;
+    const sourceLabel = `QA: ${title}`;
+    upsertEmbedding(id, sourceLabel, fullContent, vector, info.model, info.dimensions);
+    console.log(`  🧲 QA embedded: ${id} (${info.engine}, ${info.dimensions}d)`);
+
+    // 4. Hot-reload RAG index + refresh cached stats
+    const newCount = await wm.reloadRagIndex();
+    await wm.refreshStats();
+    console.log(`  🧠 RAG index reloaded: ${newCount} chunks`);
+
+    return c.json({ ok: true, id, filename, ragChunks: newCount });
+  } catch (err) {
+    console.error("❌ QA save failed:", err);
+    return c.json({ error: `Save failed: ${err instanceof Error ? err.message : err}` }, 500);
+  }
+});
+
 // ── Health ──────────────────────────────────────────────────────────
 app.get("/api/health", (c) =>
   c.json({
@@ -346,6 +486,15 @@ app.get("/api/health", (c) =>
     compaction: { threshold: COMPACT_THRESHOLD, windowSize: SLIDING_WINDOW_SIZE, interval: COMPACT_INTERVAL },
   }),
 );
+
+// ── Start ───────────────────────────────────────────────────────────
+
+/** Detailed workspace stats for the debug panel (served from cache). */
+app.get("/api/workspace/stats", (c) => {
+  const stats = wm.workspaceStats();
+  if (!stats) return c.json({ error: "Stats not yet computed" }, 503);
+  return c.json(stats);
+});
 
 // ── Start ───────────────────────────────────────────────────────────
 const port = parseInt(process.env.PORT ?? "3001", 10);

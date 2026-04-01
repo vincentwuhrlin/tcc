@@ -9,14 +9,16 @@
  *   5. Persist selection in .tcc-state.json
  *   6. Return updated workspace info + stats
  */
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync, openSync, readSync, closeSync } from "fs";
 import { join, resolve } from "path";
 import { MONOREPO_ROOT } from "./env.js";
-import { resetDb } from "@tcc/core/src/common/db.js";
+import { resetDb, getDb, getDbStats } from "@tcc/core/src/common/db.js";
 import { clearIndex, loadIndex } from "@tcc/core/src/common/rag.js";
 import { getChatEmbedEngine } from "@tcc/core/src/common/embed/index.js";
+import { CHAT_MIN_SCORE, CHAT_TOP_K } from "@tcc/core/src/config.js";
 import { loadWorkspace, scanAllWorkspaces, type WorkspaceInfo } from "./workspace.js";
 import { getActiveWorkspaceName, setActiveWorkspace } from "./state.js";
+import { COMPACT_THRESHOLD, SLIDING_WINDOW_SIZE, COMPACT_INTERVAL } from "./sessions.js";
 
 // ── Mutable state ───────────────────────────────────────────────────
 
@@ -28,15 +30,47 @@ let _planHeaders = "";
 let _ragReady = false;
 let _ragChunkCount = 0;
 
+// ── Cached workspace stats ──────────────────────────────────────────
+
+export interface CachedWorkspaceStats {
+  workspace: { id: string; name: string; title: string };
+  engine: { engine: string; model: string; dimensions: number; mode: string };
+  rag: { ready: boolean; total: number; documents: number; qa: number; minScore: number; topK: number };
+  sources: { source: string; cnt: number }[];
+  qaList: { id: string; source: string; chars: number }[];
+  categories: string[];
+  categoryDistribution: { category: string; count: number }[];
+  context: { hasInstructions: boolean; instructionsChars: number; hasDomain: boolean; domainChars: number; hasPlan: boolean; planChars: number; categoriesCount: number };
+  sessions: { total: number; messages: number };
+  compaction: { threshold: number; windowSize: number; interval: number };
+  computedAt: string;
+}
+
+let _cachedStats: CachedWorkspaceStats | null = null;
+
 // ── Accessors ───────────────────────────────────────────────────────
 
 export function currentWorkspace(): WorkspaceInfo { return _current; }
+export function currentWorkspacePath(): string { return _current.path; }
 export function allWorkspaces(): WorkspaceInfo[] { return _allWorkspaces; }
 export function instructionsContent(): string { return _instructionsContent; }
 export function domainContent(): string { return _domainContent; }
 export function planHeaders(): string { return _planHeaders; }
 export function ragReady(): boolean { return _ragReady; }
 export function ragChunkCount(): number { return _ragChunkCount; }
+export function workspaceStats(): CachedWorkspaceStats | null { return _cachedStats; }
+
+/** Reload RAG index from DB (call after inserting new embeddings). */
+export async function reloadRagIndex(): Promise<number> {
+  await loadRagIndex();
+  return _ragChunkCount;
+}
+
+/** Refresh cached workspace stats (call after QA save, workspace switch, etc.). */
+export async function refreshStats(): Promise<CachedWorkspaceStats> {
+  _cachedStats = await computeWorkspaceStats();
+  return _cachedStats;
+}
 
 // ── Resolve workspace path ──────────────────────────────────────────
 
@@ -104,6 +138,149 @@ function loadContextFiles(wsPath: string): void {
   }
 }
 
+// ── Compute workspace stats (cached) ────────────────────────────────
+
+async function computeWorkspaceStats(): Promise<CachedWorkspaceStats> {
+  const t0 = Date.now();
+  const ws = _current;
+  const dbStats = getDbStats();
+
+  // Embed engine info
+  let engineInfo = { engine: "unknown", model: "unknown", dimensions: 0, mode: "unknown" as string };
+  try {
+    const engine = await getChatEmbedEngine();
+    engineInfo = engine.info();
+  } catch { /* ignore */ }
+
+  const db = getDb();
+  const currentModel = engineInfo.model;
+
+  const totalChunks = (db.prepare(
+    "SELECT COUNT(*) as cnt FROM embeddings WHERE model = ?"
+  ).get(currentModel) as { cnt: number })?.cnt ?? 0;
+
+  const qaCount = (db.prepare(
+    "SELECT COUNT(*) as cnt FROM embeddings WHERE model = ? AND id LIKE 'QA__%'"
+  ).get(currentModel) as { cnt: number })?.cnt ?? 0;
+
+  const docCount = totalChunks - qaCount;
+
+  const topSources = db.prepare(
+    "SELECT source, COUNT(*) as cnt FROM embeddings WHERE model = ? GROUP BY source ORDER BY cnt DESC LIMIT 30"
+  ).all(currentModel) as { source: string; cnt: number }[];
+
+  const qaList = db.prepare(
+    "SELECT id, source, LENGTH(content) as chars FROM embeddings WHERE model = ? AND id LIKE 'QA__%' ORDER BY created_at DESC"
+  ).all(currentModel) as { id: string; source: string; chars: number }[];
+
+  // Categories from PLAN.md
+  const categories = _planHeaders
+    .split("\n")
+    .filter((l) => !l.startsWith("  ") && l.trim())
+    .map((l) => l.trim());
+
+  // Category distribution — scan chunk file frontmatter on disk
+  const categoryCounts: Record<string, number> = {};
+  const outputDir = join(ws.path, "media", "output");
+  for (const sub of ["documents", "videos"]) {
+    const chunksDir = join(outputDir, sub, "chunks");
+    if (!existsSync(chunksDir)) continue;
+    const files = readdirSync(chunksDir).filter((f) => f.endsWith(".md"));
+    for (const f of files) {
+      try {
+        const fd = openSync(join(chunksDir, f), "r");
+        const buf = Buffer.alloc(2048);
+        const bytesRead = readSync(fd, buf, 0, 2048, 0);
+        closeSync(fd);
+        const head = buf.toString("utf-8", 0, bytesRead);
+
+        // Extract frontmatter between --- markers
+        const fmMatch = head.match(/^---\n([\s\S]*?)\n---/);
+        if (!fmMatch) continue;
+        const fmLines = fmMatch[1].split("\n");
+
+        // Parse YAML: find "categories:" then collect "  - value" lines
+        let currentField = "";
+        let mainCat = "";
+
+        for (const line of fmLines) {
+          if (/^\w/.test(line)) {
+            currentField = line.split(":")[0];
+          } else if (/^\s+-\s/.test(line) && currentField === "categories" && !mainCat) {
+            mainCat = line.replace(/^\s+-\s*"?/, "").replace(/"?\s*$/, "");
+          }
+        }
+
+        if (mainCat) {
+          categoryCounts[mainCat] = (categoryCounts[mainCat] ?? 0) + 1;
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Build lookup map from PLAN.md: code → full name
+  // _planHeaders only has ## headings (main categories A–K)
+  // We also need subcategories from list items: "- A.1 Name (tags)"
+  const planLookup = new Map<string, string>();
+
+  // 1. Main categories from headers: "A. Platform Overview..."
+  for (const line of _planHeaders.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const codeMatch = trimmed.match(/^([A-Z][\.\d]*)\s/);
+    if (codeMatch) {
+      planLookup.set(codeMatch[1], trimmed);
+    }
+  }
+
+  // 2. Subcategories from full PLAN.md file: "- A.1 Name (tags)"
+  const planPath = join(outputDir, "PLAN.md");
+  if (existsSync(planPath)) {
+    const planContent = readFileSync(planPath, "utf-8");
+    for (const line of planContent.split("\n")) {
+      const trimmed = line.trim();
+      // Match "- A.1 Platform architecture and component overview (tags)"
+      const subMatch = trimmed.match(/^-\s+([A-Z]\.\d+)\s+(.+?)(?:\s*\(.*\))?\s*$/);
+      if (subMatch) {
+        planLookup.set(subMatch[1], `${subMatch[1]} ${subMatch[2]}`);
+      }
+    }
+  }
+
+  // Enrich codes with full names, sort by code
+  // Fallback: if exact code not found, try main category letter (A.1 → A.)
+  const categoryDistribution = Object.entries(categoryCounts)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, count]) => {
+      const full = planLookup.get(code)
+        ?? planLookup.get(code.replace(/\.$/, ""))
+        ?? planLookup.get(code.replace(/\.\d+$/, "."))
+        ?? code;
+      return { category: full, count };
+    });
+
+  console.log(`  📊 Workspace stats computed in ${Date.now() - t0}ms`);
+
+  return {
+    workspace: { id: ws.id, name: ws.name, title: ws.title },
+    engine: engineInfo,
+    rag: { ready: _ragReady, total: totalChunks, documents: docCount, qa: qaCount, minScore: CHAT_MIN_SCORE, topK: CHAT_TOP_K },
+    sources: topSources,
+    qaList,
+    categories,
+    categoryDistribution,
+    context: {
+      hasInstructions: !!_instructionsContent, instructionsChars: _instructionsContent.length,
+      hasDomain: !!_domainContent, domainChars: _domainContent.length,
+      hasPlan: !!_planHeaders, planChars: _planHeaders.length,
+      categoriesCount: categories.length,
+    },
+    sessions: { total: dbStats.sessions, messages: dbStats.messages },
+    compaction: { threshold: COMPACT_THRESHOLD, windowSize: SLIDING_WINDOW_SIZE, interval: COMPACT_INTERVAL },
+    computedAt: new Date().toISOString(),
+  };
+}
+
 // ── Load RAG index ──────────────────────────────────────────────────
 
 async function loadRagIndex(): Promise<void> {
@@ -156,6 +333,9 @@ export async function init(): Promise<void> {
   // Load RAG index
   await loadRagIndex();
 
+  // Compute and cache workspace stats
+  _cachedStats = await computeWorkspaceStats();
+
   console.log(`  ⏱️  Init: ${Date.now() - t0}ms`);
 }
 
@@ -184,6 +364,9 @@ export async function switchWorkspace(workspaceId: string): Promise<WorkspaceInf
 
   // Persist selection
   setActiveWorkspace(workspaceId);
+
+  // Recompute cached stats
+  _cachedStats = await computeWorkspaceStats();
 
   console.log(`  ✅ Switched to ${_current.name} in ${Date.now() - t0}ms`);
   console.log();

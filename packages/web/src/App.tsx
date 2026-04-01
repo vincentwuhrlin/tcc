@@ -65,6 +65,19 @@ export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // ── URL ↔ session sync helpers ───────────────────────────────────
+  const getUrlSessionId = (): string | null => {
+    const match = window.location.pathname.match(/^\/chat\/(.+)$/);
+    return match?.[1] ?? null;
+  };
+
+  const setUrl = (sessionId: string | null) => {
+    const newPath = sessionId ? `/chat/${sessionId}` : "/";
+    if (window.location.pathname !== newPath) {
+      window.history.pushState(null, "", newPath);
+    }
+  };
+
   // ── Fetch workspace info ──────────────────────────────────────────
   useEffect(() => {
     fetch("/api/workspace")
@@ -103,6 +116,31 @@ export function App() {
       .catch(() => setMessages([]));
   }, []);
 
+  // ── Restore session from URL on mount ─────────────────────────
+  useEffect(() => {
+    const urlId = getUrlSessionId();
+    if (urlId) {
+      setActiveSessionId(urlId);
+      loadSessionMessages(urlId);
+    }
+  }, [loadSessionMessages]);
+
+  // ── Browser back/forward → sync session from URL ────────────────────────────
+  useEffect(() => {
+    const onPopState = () => {
+      const urlId = getUrlSessionId();
+      if (urlId && urlId !== activeSessionId) {
+        setActiveSessionId(urlId);
+        loadSessionMessages(urlId);
+      } else if (!urlId) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [activeSessionId, loadSessionMessages]);
+
   // ── Session actions ───────────────────────────────────────────────
   const handleNewSession = useCallback(async () => {
     try {
@@ -110,6 +148,7 @@ export function App() {
       const session: Session = await res.json();
       setActiveSessionId(session.id);
       setMessages([]);
+      setUrl(session.id);
       refreshSessions();
     } catch (err) {
       console.error("Failed to create session:", err);
@@ -119,6 +158,7 @@ export function App() {
   const handleSelectSession = useCallback(
     (id: string) => {
       setActiveSessionId(id);
+      setUrl(id);
       loadSessionMessages(id);
     },
     [loadSessionMessages],
@@ -131,6 +171,7 @@ export function App() {
         if (activeSessionId === id) {
           setActiveSessionId(null);
           setMessages([]);
+          setUrl(null);
         }
         refreshSessions();
       } catch (err) {
@@ -178,6 +219,7 @@ export function App() {
         // New workspace = new sessions, clear current
         setActiveSessionId(null);
         setMessages([]);
+        setUrl(null);
         refreshSessions();
       } catch (err) {
         console.error("Failed to switch workspace:", err);
@@ -192,6 +234,7 @@ export function App() {
     const res = await fetch("/api/sessions", { method: "POST" });
     const session: Session = await res.json();
     setActiveSessionId(session.id);
+    setUrl(session.id);
     refreshSessions();
     return session.id;
   }, [activeSessionId, refreshSessions]);

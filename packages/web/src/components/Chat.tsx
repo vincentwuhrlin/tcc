@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent, type Dispatch, type SetStateAction } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { Workspace, ChatMessage, DebugPayload } from "../App";
 import { DebugPanel } from "./DebugPanel";
 
@@ -23,68 +25,275 @@ interface ChatProps {
   onMessageSent: () => void;
 }
 
-/** Minimal markdown: **bold**, _italic_, `code`, > blockquote, \n */
-function renderMarkdown(text: string) {
-  const lines = text.split("\n");
-  const elements: React.ReactNode[] = [];
+/* ── Markdown renderer using react-markdown + GFM ─────────────────── */
+const remarkPlugins = [remarkGfm];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (line.startsWith("> ")) {
-      elements.push(
-        <blockquote key={i} className="msg-blockquote">
-          {formatInline(line.slice(2))}
-        </blockquote>,
-      );
-    } else if (line.trim() === "") {
-      elements.push(<br key={i} />);
-    } else {
-      elements.push(
-        <p key={i} className="msg-paragraph">
-          {formatInline(line)}
-        </p>,
-      );
-    }
-  }
-
-  return elements;
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <Markdown
+      remarkPlugins={remarkPlugins}
+      components={{
+        // Fenced code blocks: ```lang ... ```
+        pre({ children }) {
+          return <pre className="msg-code-block">{children}</pre>;
+        },
+        // Code: inline `code` or <code> inside <pre>
+        code({ className, children, ...props }) {
+          const isBlock = className?.startsWith("language-");
+          if (isBlock) {
+            const lang = className.replace("language-", "");
+            return (
+              <code className="msg-code-content" data-lang={lang} {...props}>
+                {children}
+              </code>
+            );
+          }
+          // Inline code
+          return (
+            <code className="msg-inline-code" {...props}>
+              {children}
+            </code>
+          );
+        },
+        // Blockquote
+        blockquote({ children }) {
+          return <blockquote className="msg-blockquote">{children}</blockquote>;
+        },
+        // Paragraphs
+        p({ children }) {
+          return <p className="msg-paragraph">{children}</p>;
+        },
+        // Headings
+        h1({ children }) { return <h3 className="msg-heading msg-h1">{children}</h3>; },
+        h2({ children }) { return <h4 className="msg-heading msg-h2">{children}</h4>; },
+        h3({ children }) { return <h5 className="msg-heading msg-h3">{children}</h5>; },
+        // Lists
+        ul({ children }) { return <ul className="msg-list msg-ul">{children}</ul>; },
+        ol({ children }) { return <ol className="msg-list msg-ol">{children}</ol>; },
+        li({ children }) { return <li className="msg-li">{children}</li>; },
+        // Tables
+        table({ children }) { return <div className="msg-table-wrap"><table className="msg-table">{children}</table></div>; },
+        thead({ children }) { return <thead className="msg-thead">{children}</thead>; },
+        th({ children }) { return <th className="msg-th">{children}</th>; },
+        td({ children }) { return <td className="msg-td">{children}</td>; },
+        // Links
+        a({ href, children }) {
+          return <a className="msg-link" href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+        },
+        // Horizontal rule
+        hr() { return <hr className="msg-hr" />; },
+      }}
+    >
+      {content}
+    </Markdown>
+  );
 }
 
-function formatInline(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const regex = /(\*\*(.+?)\*\*)|(_(.+?)_)|(`(.+?)`)/g;
-  let lastIndex = 0;
-  let match;
+/* ── Message toolbar (hover actions) ───────────────────────────────── */
+function MessageToolbar({ content, role, onTag }: { content: string; role: "user" | "assistant"; onTag?: () => void }) {
+  const [copied, setCopied] = useState(false);
 
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = content;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-    if (match[1]) {
-      parts.push(<strong key={match.index}>{match[2]}</strong>);
-    } else if (match[3]) {
-      parts.push(<em key={match.index}>{match[4]}</em>);
-    } else if (match[5]) {
-      parts.push(
-        <code key={match.index} className="msg-inline-code" style={{
-          background: "rgba(192,163,244,0.12)", color: "#6b24e3",
-          borderRadius: 4, padding: "2px 6px", fontWeight: 500,
-        }}>
-          {match[6]}
-        </code>,
-      );
+  return (
+    <div className={`message-toolbar message-toolbar-${role}`}>
+      <button
+        className={`toolbar-action ${copied ? "toolbar-action-done" : ""}`}
+        onClick={handleCopy}
+        title={copied ? "Copied!" : "Copy"}
+        aria-label={copied ? "Copied" : "Copy"}
+      >
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+      {role === "assistant" && onTag && (
+        <button
+          className="toolbar-action"
+          onClick={onTag}
+          title="Save to Workspace"
+          aria-label="Save to Workspace"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 10v12" /><path d="M15 5.88L14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88z" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ── QA Tag Modal ────────────────────────────────────────────────────── */
+interface QaTagTarget {
+  question: string;
+  answer: string;
+}
+
+function QaTagModal({ target, sessionId, onClose, onSaved }: {
+  target: QaTagTarget;
+  sessionId: string | null;
+  onClose: () => void;
+  onSaved: (id: string) => void;
+}) {
+  const [phase, setPhase] = useState<"loading" | "editing" | "saving" | "error">("loading");
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("");
+  const [condensed, setCondensed] = useState("");
+  const [categories, setCategories] = useState<string[]>([]);
+  const [error, setError] = useState("");
+
+  // Auto-call prepare on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/qa/prepare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: target.question, answer: target.answer }),
+        });
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        const data = await res.json() as { title: string; category: string; condensed: string; categories: string[] };
+        if (cancelled) return;
+        setTitle(data.title);
+        setCategory(data.category);
+        setCondensed(data.condensed);
+        setCategories(data.categories);
+        setPhase("editing");
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Prepare failed");
+        setPhase("error");
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [target]);
+
+  const handleSave = async () => {
+    setPhase("saving");
+    try {
+      const res = await fetch("/api/qa/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: target.question,
+          answer: target.answer,
+          title, category, condensed, sessionId,
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json() as { ok: boolean; id: string };
+      onSaved(data.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+      setPhase("error");
     }
+  };
 
-    lastIndex = match.index + match[0].length;
-  }
+  return (
+    <div className="qa-modal-overlay" onClick={onClose}>
+      <div className="qa-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="qa-modal-header">
+          <span className="qa-modal-icon">👍</span>
+          <span className="qa-modal-title">Save to Workspace</span>
+          <button className="qa-modal-close" onClick={onClose}>×</button>
+        </div>
 
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
+        {phase === "loading" && (
+          <div className="qa-modal-body qa-modal-center">
+            <div className="qa-modal-spinner" />
+            <p>Analyzing Q&A with LLM...</p>
+          </div>
+        )}
 
-  return parts;
+        {phase === "error" && (
+          <div className="qa-modal-body qa-modal-center">
+            <p className="qa-modal-error">❌ {error}</p>
+            <button className="qa-btn qa-btn-secondary" onClick={onClose}>Close</button>
+          </div>
+        )}
+
+        {(phase === "editing" || phase === "saving") && (
+          <>
+            <div className="qa-modal-body">
+              <label className="qa-label">Title</label>
+              <input
+                className="qa-input"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                disabled={phase === "saving"}
+              />
+
+              <label className="qa-label">Category</label>
+              <select
+                className="qa-input qa-select"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                disabled={phase === "saving"}
+              >
+                {categories.map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+                <option value="Uncategorized">Uncategorized</option>
+              </select>
+
+              <label className="qa-label">Condensed (for embedding)</label>
+              <textarea
+                className="qa-input qa-textarea"
+                value={condensed}
+                onChange={(e) => setCondensed(e.target.value)}
+                rows={5}
+                disabled={phase === "saving"}
+              />
+
+              <label className="qa-label">Preview</label>
+              <div className="qa-preview">
+                <div className="qa-preview-q">
+                  <strong>Q:</strong> {target.question.length > 200 ? target.question.slice(0, 200) + "…" : target.question}
+                </div>
+                <div className="qa-preview-a">
+                  <strong>A:</strong> {target.answer.length > 300 ? target.answer.slice(0, 300) + "…" : target.answer}
+                </div>
+              </div>
+            </div>
+
+            <div className="qa-modal-footer">
+              <button className="qa-btn qa-btn-secondary" onClick={onClose} disabled={phase === "saving"}>
+                Cancel
+              </button>
+              <button className="qa-btn qa-btn-primary" onClick={handleSave} disabled={phase === "saving" || !title.trim() || !condensed.trim()}>
+                {phase === "saving" ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function Chat({ workspace, messages, setMessages, activeSessionId, ensureSession, onMessageSent }: ChatProps) {
@@ -92,6 +301,8 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
   const [isLoading, setIsLoading] = useState(false);
   const [lastCompaction, setLastCompaction] = useState<{ totalMessages: number } | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [qaTarget, setQaTarget] = useState<QaTagTarget | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
@@ -154,6 +365,29 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Auto-clear toast after 4s
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // Find the user question preceding a given assistant message index
+  const handleTag = (assistantMsgId: string | number) => {
+    const idx = messages.findIndex((m) => m.id === assistantMsgId);
+    if (idx < 1) return;
+    // Walk backwards to find the preceding user message
+    let question = "";
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        question = messages[i].content;
+        break;
+      }
+    }
+    if (!question) return;
+    setQaTarget({ question, answer: messages[idx].content });
+  };
 
   const send = async () => {
     const text = input.trim();
@@ -376,7 +610,14 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
           <div className="sources-list">
             {sources?.map((s, i) => (
               <div key={i} className="source-item">
-                <span className="source-name" style={{ color: "var(--purple, #7B3FE4)", fontWeight: 600 }}>{s.source}</span>
+                {s.source.startsWith("QA:") ? (
+                  <span className="source-name source-name-qa">
+                    <span className="source-qa-badge">QA</span>
+                    {s.source.slice(4)}
+                  </span>
+                ) : (
+                  <span className="source-name" style={{ color: "var(--purple, #7B3FE4)", fontWeight: 600 }}>{s.source}</span>
+                )}
                 <span className="source-score">{(s.score * 100).toFixed(0)}%</span>
               </div>
             ))}
@@ -480,10 +721,28 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
             </button>
           </div>
           <div className="input-footer">
-            <span>Release 5 — SSE streaming + debug panel</span>
-            <span>Shift+Enter for line break</span>
+            <span>Release 6 — Markdown + Q&A tagging + debug stats</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span>Shift+Enter for line break</span>
+              <button
+                type="button"
+                onClick={() => setDebugOpen(!debugOpen)}
+                title="Toggle debug panel (Ctrl+Shift+D)"
+                style={{
+                  background: debugOpen ? "var(--teal)" : "transparent",
+                  color: debugOpen ? "#fff" : "inherit",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4, padding: "2px 8px", cursor: "pointer",
+                  fontSize: 11, fontWeight: 600, opacity: debugOpen ? 1 : 0.5,
+                }}
+              >
+                🔬 Debug
+              </button>
+            </div>
           </div>
         </form>
+
+        <DebugPanel messages={messages} visible={debugOpen} onClose={() => setDebugOpen(false)} />
       </div>
     );
   }
@@ -494,14 +753,33 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
       <div className="messages" ref={messagesContainerRef}>
         {messages.map((msg) => (
           <div key={msg.id} className={`message message-${msg.role}`}>
-            {/* Show loading indicator for empty streaming assistant message */}
             {msg.role === "assistant" && msg.content === "" && isLoading ? (
-              <LoadingIndicator messageCount={messages.length} />
+              <div className="message-body">
+                <LoadingIndicator messageCount={messages.length} />
+              </div>
+            ) : msg.role === "assistant" ? (
+              <>
+                <div className="message-body">
+                  <div className="message-content">
+                    <MarkdownContent content={msg.content} />
+                  </div>
+                  {msg.content !== "" && (
+                    <SourcesBlock sources={msg.sources} timing={msg.timing} context={msg.context} />
+                  )}
+                </div>
+                {msg.content !== "" && (
+                  <MessageToolbar content={msg.content} role="assistant" onTag={() => handleTag(msg.id)} />
+                )}
+              </>
             ) : (
-              <div className="message-content">{renderMarkdown(msg.content)}</div>
-            )}
-            {msg.role === "assistant" && msg.content !== "" && (
-              <SourcesBlock sources={msg.sources} timing={msg.timing} context={msg.context} />
+              <>
+                <div className="message-content">
+                  <MarkdownContent content={msg.content} />
+                </div>
+                {msg.content !== "" && (
+                  <MessageToolbar content={msg.content} role="user" />
+                )}
+              </>
             )}
           </div>
         ))}
@@ -536,7 +814,7 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
           </button>
         </div>
         <div className="input-footer">
-          <span>Release 5 — SSE streaming + debug panel</span>
+          <span>Release 6 — Markdown + Q&A tagging + debug stats</span>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span>Shift+Enter for line break</span>
             <button
@@ -558,6 +836,27 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
       </form>
 
       <DebugPanel messages={messages} visible={debugOpen} onClose={() => setDebugOpen(false)} />
+
+      {/* QA Tag Modal */}
+      {qaTarget && (
+        <QaTagModal
+          target={qaTarget}
+          sessionId={activeSessionId}
+          onClose={() => setQaTarget(null)}
+          onSaved={(id) => {
+            setQaTarget(null);
+            setToast({ message: `Saved: ${id}`, type: "success" });
+          }}
+        />
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className={`qa-toast qa-toast-${toast.type}`}>
+          <span>{toast.type === "success" ? "🏷️" : "❌"}</span>
+          <span>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }
