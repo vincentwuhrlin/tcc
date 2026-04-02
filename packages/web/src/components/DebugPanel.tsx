@@ -148,6 +148,45 @@ function DebugEntry({ debug, timing }: { debug: DebugPayload; timing?: ChatMessa
         )}
       </Section>
 
+      {debug.deepSearch?.enabled && (
+        <Section title="Deep Search" badge={`+${debug.deepSearch.pass2Count} new chunks via ${debug.deepSearch.subQueries.length} sub-queries`} defaultOpen>
+          <KV k="Pass 1 (initial)" v={`${debug.deepSearch.pass1Count} chunks`} />
+          <KV k="Pass 2 (deep)" v={`+${debug.deepSearch.pass2Count} new chunks`} />
+          <KV k="Duplicates removed" v={debug.deepSearch.deduped} />
+          <KV k="Final merged" v={`${debug.deepSearch.mergedCount} chunks`} />
+          <div style={{ marginTop: 6, marginBottom: 2 }}>
+            <span style={{ fontSize: 10, opacity: 0.6 }}>Timings</span>
+          </div>
+          <KV k="Sub-query gen" v={`${debug.deepSearch.timings.subQueryGenMs}ms`} />
+          <KV k="Pass 2 embed" v={`${debug.deepSearch.timings.pass2EmbedMs}ms`} />
+          <KV k="Pass 2 search" v={`${debug.deepSearch.timings.pass2SearchMs}ms`} />
+          <KV k="Total deep search" v={`${debug.deepSearch.timings.totalMs}ms`} />
+          {debug.deepSearch.subQueries.length > 0 && (
+            <>
+              <div style={{ marginTop: 6, marginBottom: 2 }}>
+                <span style={{ fontSize: 10, opacity: 0.6 }}>LLM-generated sub-queries</span>
+              </div>
+              {debug.deepSearch.subQueries.map((sq, i) => (
+                <div key={i} style={{
+                  fontSize: 10, padding: "3px 8px", margin: "2px 0",
+                  background: "var(--debug-pre-bg)", borderRadius: 4, lineHeight: 1.4,
+                }}>
+                  <span style={{ opacity: 0.4, marginRight: 4 }}>{i + 1}.</span> {sq}
+                </div>
+              ))}
+            </>
+          )}
+        </Section>
+      )}
+
+      {!debug.deepSearch?.enabled && (
+        <Section title="Deep Search" badge="OFF">
+          <div style={{ opacity: 0.5, fontStyle: "italic", fontSize: 11 }}>
+            Enable with CHAT_DEEP_SEARCH=true in .env
+          </div>
+        </Section>
+      )}
+
       <Section title="Prompt Breakdown" badge={`${(debug.prompt.totalChars / 1000).toFixed(1)}k chars ≈ ${Math.round(debug.prompt.totalChars / 4)}tok`}>
         {(["instructions", "domain", "plan", "ragContext", "history", "summary"] as const).map((key) => (
           <PromptBar key={key} label={key} chars={debug.prompt[key]} total={debug.prompt.totalChars} />

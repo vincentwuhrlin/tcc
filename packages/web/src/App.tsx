@@ -48,6 +48,7 @@ export interface DebugPayload {
   prompt: { totalChars: number; instructions: number; domain: number; plan: number; ragContext: number; history: number; summary: number };
   session: { id: string; totalMessages: number; windowSize: number; hasCompaction: boolean; needsCompaction: boolean };
   config: { provider: string; model: string; streaming: boolean; embedEngine: string };
+  deepSearch: { enabled: boolean; subQueries: string[]; pass1Count: number; pass2Count: number; mergedCount: number; deduped: number; timings: { subQueryGenMs: number; pass2EmbedMs: number; pass2SearchMs: number; totalMs: number } };
 }
 
 interface WorkspaceItem {

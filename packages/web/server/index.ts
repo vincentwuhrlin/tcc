@@ -13,9 +13,9 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
 
-import { API_PROVIDER, API_MODEL, CHAT_EMBED_ENGINE, CHAT_TOP_K, CHAT_MIN_SCORE, CHAT_API_STREAMING, CHAT_API_PROVIDER, CHAT_API_MODEL } from "@tcc/core/src/config.js";
+import { API_PROVIDER, API_MODEL, CHAT_EMBED_ENGINE, CHAT_TOP_K, CHAT_MIN_SCORE, CHAT_DEEP_SEARCH, CHAT_API_STREAMING, CHAT_API_PROVIDER, CHAT_API_MODEL } from "@tcc/core/src/config.js";
 import { getChatEmbedEngine, getMediaEmbedEngine } from "@tcc/core/src/common/embed/index.js";
-import { searchChunks, assembleContext, type SearchResult } from "@tcc/core/src/common/rag.js";
+import { searchChunks, assembleContext, deepSearch, type SearchResult, type DeepSearchDebug } from "@tcc/core/src/common/rag.js";
 import { upsertEmbedding } from "@tcc/core/src/common/db.js";
 import { llmCall, llmStreamCall, getChatLlmConfig } from "@tcc/core/src/common/llm.js";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
@@ -201,6 +201,7 @@ app.post("/api/chat", async (c) => {
   let ragResults: SearchResult[] = [];
   let embedMs = 0;
   let searchMs = 0;
+  let deepSearchDebug: DeepSearchDebug | null = null;
 
   // RAG (sync — happens before streaming starts)
   if (wm.ragReady()) {
@@ -214,11 +215,26 @@ app.post("/api/chat", async (c) => {
       ragResults = searchChunks(queryVector, CHAT_TOP_K);
       searchMs = Date.now() - ts;
 
+      // Deep search: multi-pass retrieval with LLM-generated sub-queries
+      if (CHAT_DEEP_SEARCH && ragResults.length > 0) {
+        const chatConfig = getChatLlmConfig();
+        const ds = await deepSearch(
+          message,
+          ragResults,
+          (text) => engine.embedQuery(text),
+          (system, user, maxTokens) => llmCall(system, user, maxTokens, chatConfig),
+          CHAT_TOP_K,
+          CHAT_MIN_SCORE,
+        );
+        ragResults = ds.results;
+        deepSearchDebug = ds.debug;
+      }
+
       ragContext = assembleContext(ragResults, 80_000);
       const seen = new Set<string>();
       sources = ragResults
         .filter((r) => { if (seen.has(r.source)) return false; seen.add(r.source); return true; })
-        .slice(0, 10)
+        .slice(0, 15)
         .map((r) => ({ source: r.source, score: Math.round(r.score * 1000) / 1000 }));
     } catch (err) {
       console.error(`⚠️  RAG failed: ${err instanceof Error ? err.message : err}`);
@@ -293,6 +309,7 @@ app.post("/api/chat", async (c) => {
           streaming: CHAT_API_STREAMING,
           embedEngine: CHAT_EMBED_ENGINE,
         },
+        deepSearch: deepSearchDebug ?? { enabled: false, subQueries: [], pass1Count: ragResults.length, pass2Count: 0, mergedCount: ragResults.length, deduped: 0, timings: { subQueryGenMs: 0, pass2EmbedMs: 0, pass2SearchMs: 0, totalMs: 0 } },
       }),
     });
 

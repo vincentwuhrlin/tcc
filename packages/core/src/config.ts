@@ -207,6 +207,7 @@ export const CHAT_EMBED_API_BASE_URL = process.env.CHAT_EMBED_API_BASE_URL ?? ME
 // Chat search
 export const CHAT_TOP_K = parseInt(process.env.CHAT_TOP_K ?? "20", 10);
 export const CHAT_MIN_SCORE = parseFloat(process.env.CHAT_MIN_SCORE ?? "0.3");
+export const CHAT_DEEP_SEARCH = (process.env.CHAT_DEEP_SEARCH ?? "false") === "true";
 
 // ── Projects (Claude Projects export) ───────────────────────────────
 export const BUNDLES_FILE = resolvePath(process.env.BUNDLES_FILE ?? join(BUNDLES_DIR, "bundles.json"));

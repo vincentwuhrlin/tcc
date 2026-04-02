@@ -103,3 +103,122 @@ export function assembleContext(results: SearchResult[], maxChars: number = 80_0
 
   return parts.join("\n\n---\n\n");
 }
+
+// ── Deep Search ──────────────────────────────────────────────────────
+// Multi-pass retrieval: LLM generates sub-queries → embed each → search → deduplicate
+
+export interface DeepSearchDebug {
+  enabled: boolean;
+  subQueries: string[];
+  pass1Count: number;
+  pass2Count: number;
+  mergedCount: number;
+  deduped: number;
+  timings: { subQueryGenMs: number; pass2EmbedMs: number; pass2SearchMs: number; totalMs: number };
+}
+
+const SUB_QUERY_SYSTEM = `You generate search sub-queries for a RAG knowledge base about industrial automation (NAMUR Open Architecture, IEC 62443, data diodes, OPC UA, MTP).
+
+Given a user question and a list of sources already found, generate 3-5 additional search queries that would find MISSING information. Focus on:
+- Specific vendor names, product models, or standards not yet covered
+- Related technical concepts the user likely needs
+- Concrete implementation details, test results, or certifications
+
+Return ONLY a JSON array of strings, no markdown, no explanation. Example:
+["genua cyber-diode OPC UA interoperability", "Waterfall NOA test results", "IEC 62443 SL3 hardware certification"]`;
+
+/**
+ * Deep search: generate sub-queries via LLM, embed each, search, merge with pass 1 results.
+ */
+export async function deepSearch(
+  originalQuery: string,
+  pass1Results: SearchResult[],
+  embedFn: (text: string) => Promise<number[]>,
+  llmFn: (system: string, user: string, maxTokens: number) => Promise<string>,
+  topK: number,
+  minScore: number,
+): Promise<{ results: SearchResult[]; debug: DeepSearchDebug }> {
+  const t0 = Date.now();
+  const debug: DeepSearchDebug = {
+    enabled: true,
+    subQueries: [],
+    pass1Count: pass1Results.length,
+    pass2Count: 0,
+    mergedCount: 0,
+    deduped: 0,
+    timings: { subQueryGenMs: 0, pass2EmbedMs: 0, pass2SearchMs: 0, totalMs: 0 },
+  };
+
+  // Step 1: Generate sub-queries
+  const existingSources = [...new Set(pass1Results.map((r) => r.source))].slice(0, 10).join(", ");
+  const userPrompt = `Question: "${originalQuery}"
+
+Sources already found (${pass1Results.length} chunks): ${existingSources}
+
+Generate 3-5 sub-queries to find MISSING information. Return ONLY a JSON array of strings.`;
+
+  const tq = Date.now();
+  let subQueries: string[] = [];
+  try {
+    const raw = await llmFn(SUB_QUERY_SYSTEM, userPrompt, 512);
+    const cleaned = raw.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) {
+      subQueries = parsed.filter((q: unknown) => typeof q === "string" && q.length > 5).slice(0, 5);
+    }
+  } catch {
+    // If LLM fails to produce valid JSON, fall back to no deep search
+    debug.timings.totalMs = Date.now() - t0;
+    return { results: pass1Results, debug };
+  }
+  debug.subQueries = subQueries;
+  debug.timings.subQueryGenMs = Date.now() - tq;
+
+  if (subQueries.length === 0) {
+    debug.timings.totalMs = Date.now() - t0;
+    return { results: pass1Results, debug };
+  }
+
+  // Step 2: Embed and search each sub-query
+  const pass1Ids = new Set(pass1Results.map((r) => r.id));
+  const allNewResults: SearchResult[] = [];
+
+  const te = Date.now();
+  const subQueryVectors: number[][] = [];
+  for (const sq of subQueries) {
+    subQueryVectors.push(await embedFn(sq));
+  }
+  debug.timings.pass2EmbedMs = Date.now() - te;
+
+  const ts = Date.now();
+  for (const vec of subQueryVectors) {
+    const results = searchChunks(vec, topK, minScore);
+    for (const r of results) {
+      if (!pass1Ids.has(r.id)) {
+        allNewResults.push(r);
+      }
+    }
+  }
+  debug.timings.pass2SearchMs = Date.now() - ts;
+  debug.pass2Count = allNewResults.length;
+
+  // Step 3: Deduplicate new results (keep highest score per chunk)
+  const bestByChunk = new Map<string, SearchResult>();
+  for (const r of allNewResults) {
+    const existing = bestByChunk.get(r.id);
+    if (!existing || r.score > existing.score) {
+      bestByChunk.set(r.id, r);
+    }
+  }
+
+  const dedupedNew = [...bestByChunk.values()];
+  debug.deduped = allNewResults.length - dedupedNew.length;
+
+  // Step 4: Merge pass 1 + pass 2, sort by score
+  const merged = [...pass1Results, ...dedupedNew];
+  merged.sort((a, b) => b.score - a.score);
+  debug.mergedCount = merged.length;
+
+  debug.timings.totalMs = Date.now() - t0;
+  return { results: merged, debug };
+}
