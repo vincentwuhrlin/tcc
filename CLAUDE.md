@@ -4,52 +4,86 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**TCC** (Transcript, Classify & Chat) is a monorepo for processing media (PDFs, videos) into searchable knowledge bases with RAG-powered chat. It runs a multi-stage pipeline: ingest media → discover topics → synthesize summaries → classify with YAML frontmatter → split into chunks → embed vectors → chat via terminal or web UI.
+**TCC** (Transcript, Classify & Chat) is a monorepo for processing media (PDFs, videos) into searchable knowledge bases with RAG-powered chat. It runs a multi-stage pipeline: transcribe media → discover topics → synthesize summaries → classify with YAML frontmatter → split into chunks → embed vectors → chat via terminal or web UI.
+
+## Prerequisites
+
+- **Node** ≥ 20 (see root `package.json` `engines`)
+- **pnpm** 10.33.0 (pinned via `packageManager`)
+- Native modules that need build approval on first install: `better-sqlite3`, `onnxruntime-node`, `sharp` (listed in root `pnpm.onlyBuiltDependencies`)
+- `.env` at the monorepo root — `config.ts` walks up to find `pnpm-workspace.yaml` and loads `.env` from there. A starter file exists at `.env.quickstart`.
+- There is **no test suite, linter, or formatter configured** in this repo — do not invent `pnpm test`/`pnpm lint` commands. TypeScript is executed directly via `tsx` (no build step for `@tcc/core`).
 
 ## Monorepo Structure
 
-- **`packages/core`** (`@tcc/core`) — CLI tool with 25+ commands for the media processing pipeline and terminal chat. Entry point: `src/cli.ts`.
-- **`packages/web`** (`@tcc/web`) — Full-stack web UI. React 19 frontend (Vite) + Hono API server (Node.js). Depends on `@tcc/core` for shared modules (config, db, rag, llm, embed).
-- **`templates/context/`** — Prompt templates used by pipeline commands and chat. Uses `{{PLACEHOLDER}}` interpolation and `---USER---` separator for system/user message split.
-- **`workspaces/`** — Isolated knowledge bases. Each workspace has `media/`, `context/`, `bundles/`, and `workspace.db` (SQLite).
+- **`packages/core`** (`@tcc/core`) — CLI tool with 25+ commands for the media processing pipeline and terminal chat. Entry point: `src/cli.ts` (command registry). Subdirs: `commands/`, `common/` (shared modules: `db`, `llm`, `rag`, `embed/`, `prompts`, `history`, `media`, `toc-parser`), `scripts/` (one-off maintenance scripts), plus `config.ts`, `preflight.ts`, `state.ts`, `runpod.ts`/`runpodctl.ts`/`ssh.ts` (GPU pod automation).
+- **`packages/web`** (`@tcc/web`) — Full-stack web UI. React 19 frontend (Vite) + Hono API server (Node.js). `server/` has `index.ts`, `sessions.ts`, `workspace.ts`, `workspace-manager.ts`, `state.ts`, `env.ts`. Depends on `@tcc/core` for shared modules (config, db, rag, llm, embed).
+- **`templates/context/`** — Prompt templates grouped by pipeline stage: `discover/`, `synthesize/`, `classify/`, `split/`, `chat/`, `shared/`. Uses `{{PLACEHOLDER}}` interpolation and `---USER---` separator for system/user message split. A workspace may override any template via its own `context/` directory.
+- **`workspaces/`** — Isolated knowledge bases. Each workspace has `media/`, `context/` (optional overrides), `workspace.json`, `workspace.db` (SQLite), and pipeline outputs (`DISCOVERY.md`, `SUMMARY.md`, `PLAN.md`, `INDEX.md`, etc.).
 
 ## Commands
 
+Root scripts (`package.json`) only cover the web app. All pipeline/CLI commands live in `packages/core/package.json` and must be run from `packages/core/` **or** via `pnpm --filter @tcc/core <script>`.
+
 ```bash
-# Install dependencies
+# Install dependencies (first run will build better-sqlite3, onnxruntime-node, sharp)
 pnpm install
 
-# Run web chat (server + client concurrently)
-pnpm chat                        # opens at http://localhost:3000
-
-# Run individual web servers
+# ── Web chat (from repo root) ──────────────────────────────────────
+pnpm chat                        # server + client concurrently → http://localhost:3000
 pnpm chat:server                 # Hono API on :3001
 pnpm chat:client                 # Vite dev on :3000
+pnpm chat:build                  # Vite production build
 
-# Core CLI commands (run from packages/core/)
-pnpm media:discover              # Extract topics from media files → DISCOVERY.md
-pnpm media:synthesize            # Generate SUMMARY.md + PLAN.md
-pnpm media:classify              # Add YAML frontmatter + INDEX.md
-pnpm media:split                 # Chunk documents for RAG
-pnpm media:split --dry-run       # Preview chunking without writing
-pnpm media:embed                 # Generate vector embeddings → workspace.db
-pnpm media:embed:stats           # Show embedding stats per model
-pnpm media:stats                 # Show KB metrics (pages, duration, tokens)
+# ── Transcription (local tools: yt-dlp, ffmpeg, runpodctl) ─────────
+pnpm --filter @tcc/core transcript:setup       # install the local tools
+pnpm --filter @tcc/core transcript             # documents + videos → Markdown
+pnpm --filter @tcc/core transcript:documents   # PDFs only
+pnpm --filter @tcc/core transcript:videos      # videos only
 
-# Terminal chat
-pnpm --filter @tcc/core chat
+# ── Media pipeline (run in this order after transcription) ─────────
+pnpm --filter @tcc/core media:discover         # 1. topics → DISCOVERY.md
+pnpm --filter @tcc/core media:synthesize       # 2. SUMMARY.md + PLAN.md
+pnpm --filter @tcc/core media:classify         # 3. YAML frontmatter + INDEX.md
+pnpm --filter @tcc/core media:split            # 4. chunk docs (supports --dry-run, split:check, split:undo)
+pnpm --filter @tcc/core media:embed            # 5. vector embeddings → workspace.db
+pnpm --filter @tcc/core media:embed:gpu        # embed on a RunPod GPU pod end-to-end
+pnpm --filter @tcc/core media:embed:bench      # benchmark engines on a query set
+pnpm --filter @tcc/core media:embed:import     # import embeddings from another workspace.db
+pnpm --filter @tcc/core media:embed:stats      # stats per model/DTYPE
+pnpm --filter @tcc/core media:stats            # KB metrics (pages, duration, tokens)
+
+# ── GPU pod lifecycle (RunPod) ─────────────────────────────────────
+pnpm --filter @tcc/core gpu:create | gpu:status | gpu:ssh | gpu:start | gpu:stop | gpu:terminate
+
+# ── Workspace management (these commands require --workspace=<name>) ──
+pnpm --filter @tcc/core workspace:clean -- --workspace=<name>          # strip dynamic data
+pnpm --filter @tcc/core workspace:clean:dry -- --workspace=<name>      # preview
+pnpm --filter @tcc/core workspace:clean:with-qa -- --workspace=<name>  # also wipe QA + embeddings
+pnpm --filter @tcc/core workspace:zip -- --workspace=<name>            # slim zip for sharing
+pnpm --filter @tcc/core workspace:zip:full -- --workspace=<name>       # include raw media
+
+# ── Interactive / utilities ────────────────────────────────────────
+pnpm --filter @tcc/core chat                   # terminal chat against the active workspace
+pnpm --filter @tcc/core uptimize:stats         # UPTIMIZE API spend + status
 ```
 
-All core CLI scripts invoke `tsx src/cli.ts <command>`. The `--workspace=<name>` flag overrides the `WORKSPACE` env var.
+**Workspace selection**: every CLI command resolves the active workspace as `WORKSPACES_DIR/WORKSPACE` from `.env`, and the `--workspace=<name>` flag overrides `WORKSPACE` for a single invocation. When passing the flag through `pnpm --filter`, remember the `--` separator so pnpm forwards the arg: `pnpm --filter @tcc/core media:embed -- --workspace=industrial-edge`.
+
+**Flags**: commands are idempotent/resumable where possible (e.g. `embed` skips already-embedded chunks). `--force` re-processes everything; `--dry-run` previews without writing. `discover`, `classify`, `embed`, `workspace:clean` all expose `:force`/`:dry` script variants.
+
+All core CLI scripts invoke `tsx src/cli.ts <command>`; the command registry is in `packages/core/src/cli.ts`. A few commands are registered in `cli.ts` but have no pnpm script wrapper (e.g. `export`) — invoke them directly with `pnpm --filter @tcc/core exec tsx src/cli.ts <command>`.
 
 ## Architecture
 
 ### Configuration (`packages/core/src/config.ts`)
 
-Central config loaded from `.env` at monorepo root (found by walking up to `pnpm-workspace.yaml`). Uses a fallback chain:
+Central config loaded from `.env` at monorepo root (found by walking up to `pnpm-workspace.yaml`). Key env vars: `WORKSPACES_DIR` (default `workspaces/`), `WORKSPACE` (active workspace name; overridden by `--workspace=<name>`), plus the `API_*` / `CHAT_API_*` / `MEDIA_EMBED_*` / `CHAT_EMBED_*` credential sets. Uses a fallback chain:
 - `CHAT_API_*` → `API_*` (chat LLM falls back to media pipeline LLM)
 - `CHAT_EMBED_*` → `MEDIA_EMBED_*` (chat embedding falls back to media embedding)
 - `MEDIA_EMBED_API_*` → `API_*` (embedding API creds fall back to main API creds)
+
+The `.env.quickstart` file at the repo root is a starter template — copy to `.env` and fill in credentials.
 
 ### LLM (`packages/core/src/common/llm.ts`)
 

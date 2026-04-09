@@ -23,12 +23,15 @@
  *   pnpm workspace:zip --workspace=noa --full      # include raw media too
  *   pnpm workspace:zip --workspace=noa --dry-run   # list files, don't write
  *
+ * Default output path: WORKSPACES_DIR/<workspace>-<YYYYMMDD>.zip
+ * (i.e. alongside the workspace directories themselves, not the cwd)
+ *
  * Recommended flow for sharing with teammates:
  *   1. pnpm workspace:clean --workspace=noa --with-qa
  *   2. pnpm workspace:zip   --workspace=noa
  *   3. Share the resulting .zip
  */
-import { printHeader, WORKSPACE, WORKSPACE_NAME, WORKSPACE_FLAG_EXPLICIT } from "../config.js";
+import { printHeader, WORKSPACE, WORKSPACE_NAME, WORKSPACES_DIR, WORKSPACE_FLAG_EXPLICIT } from "../config.js";
 import { join, resolve, relative, sep } from "path";
 import { existsSync, statSync, createWriteStream, mkdirSync } from "fs";
 import { readdir } from "fs/promises";
@@ -168,10 +171,12 @@ export async function workspaceZip(): Promise<void> {
   console.log(`   Source: ${WORKSPACE}`);
 
   // ── Resolve output path ───────────────────────────────────────────
+  // Default: write alongside the other workspaces (WORKSPACES_DIR/<n>-YYYYMMDD.zip)
+  // Override: --output=<path> (relative paths resolved against process.cwd())
   const defaultName = `${WORKSPACE_NAME}-${todayStr()}.zip`;
   const outputPath = outputArg
     ? resolve(process.cwd(), outputArg)
-    : resolve(process.cwd(), defaultName);
+    : resolve(WORKSPACES_DIR, defaultName);
 
   console.log(`   Output: ${outputPath}`);
   console.log(`   Mode:   ${FULL ? "full (including raw media)" : "slim (excluding raw media)"}`);

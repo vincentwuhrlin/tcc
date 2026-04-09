@@ -4,4 +4,7 @@ tmp/
 .DS_Store
 .env
 workspaces
-.tcc-state.json
+
+# Claude Code — personal overrides
+.claude/settings.local.json
+CLAUDE.local.md

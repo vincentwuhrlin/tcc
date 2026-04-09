@@ -1,0 +1,234 @@
+<svg width="100%" viewBox="0 0 960 1180" xmlns="http://www.w3.org/2000/svg" font-family="'Anthropic Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <style>
+    .title       { font-size:18px; font-weight:600; fill:#141413; }
+    .subtitle    { font-size:13px; font-weight:400; fill:#5f5e5a; }
+    .section     { font-size:14px; font-weight:600; fill:#3d3d3a; }
+    .label       { font-size:14px; font-weight:500; }
+    .sub         { font-size:11px; font-weight:400; }
+    .step        { font-size:11px; font-weight:500; fill:#73726c; }
+    .arrow       { fill:none; stroke:#73726c; stroke-width:1.5; }
+    .arrow-thick { fill:none; stroke:#534ab7; stroke-width:2; }
+  </style>
+</defs>
+
+<!-- ============ TITLE ============ -->
+<text x="480" y="34" text-anchor="middle" class="title">TCC — Pipeline d'ingestion et chat RAG</text>
+<text x="480" y="54" text-anchor="middle" class="subtitle">Transcript → Discover → Synthesize → Split → Classify → Embed → Chat</text>
+
+<!-- ============ SECTION 1: BUILD PIPELINE ============ -->
+<text x="40" y="92" class="section">① Pipeline de build (offline) — pnpm --filter @tcc/core media:*</text>
+<line x1="40" y1="100" x2="920" y2="100" stroke="#e5e4dc" stroke-width="1"/>
+
+<!-- Sources -->
+<g>
+  <rect x="40" y="120" width="180" height="64" rx="10" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+  <text x="130" y="142" text-anchor="middle" class="label" fill="#633806">Sources média</text>
+  <text x="130" y="160" text-anchor="middle" class="sub" fill="#854f0b">PDFs · Vidéos locales</text>
+  <text x="130" y="174" text-anchor="middle" class="sub" fill="#854f0b">YouTube (yt-dlp)</text>
+</g>
+
+<!-- Arrow + step 1 -->
+<line x1="220" y1="152" x2="265" y2="152" class="arrow" marker-end="url(#arrow)"/>
+<text x="242" y="142" text-anchor="middle" class="step">1</text>
+
+<!-- Transcript -->
+<g>
+  <rect x="265" y="120" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text x="365" y="142" text-anchor="middle" class="label" fill="#085041">transcript</text>
+  <text x="365" y="158" text-anchor="middle" class="sub" fill="#0f6e56">marker_single (PDF → MD)</text>
+  <text x="365" y="172" text-anchor="middle" class="sub" fill="#0f6e56">faster-whisper large-v3 (audio)</text>
+</g>
+
+<!-- Arrow to MD output -->
+<line x1="465" y1="152" x2="510" y2="152" class="arrow" marker-end="url(#arrow)"/>
+
+<!-- media/*.md -->
+<g>
+  <rect x="510" y="120" width="200" height="64" rx="10" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="610" y="142" text-anchor="middle" class="label" fill="#444441">workspace/media/*.md</text>
+  <text x="610" y="158" text-anchor="middle" class="sub" fill="#5f5e5a">documents/ et videos/</text>
+  <text x="610" y="172" text-anchor="middle" class="sub" fill="#5f5e5a">en-tête de source injecté</text>
+</g>
+
+<!-- GPU pod side note -->
+<g>
+  <rect x="740" y="125" width="180" height="54" rx="8" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5" stroke-dasharray="3 3"/>
+  <text x="830" y="146" text-anchor="middle" class="sub" fill="#3c3489">RunPod GPU pod</text>
+  <text x="830" y="162" text-anchor="middle" class="sub" fill="#534ab7">gpu:create / gpu:ssh / gpu:stop</text>
+</g>
+<line x1="725" y1="152" x2="740" y2="152" stroke="#534ab7" stroke-width="0.5" stroke-dasharray="3 3"/>
+
+<!-- ============ Phase 2 — Discover ============ -->
+<line x1="610" y1="184" x2="610" y2="220" class="arrow" marker-end="url(#arrow)"/>
+<text x="624" y="205" class="step">2</text>
+
+<g>
+  <rect x="510" y="220" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text x="610" y="242" text-anchor="middle" class="label" fill="#085041">discover</text>
+  <text x="610" y="258" text-anchor="middle" class="sub" fill="#0f6e56">LLM par section TOC</text>
+  <text x="610" y="272" text-anchor="middle" class="sub" fill="#0f6e56">→ frontmatter YAML par fichier</text>
+</g>
+
+<line x1="510" y1="252" x2="450" y2="252" class="arrow" marker-end="url(#arrow)"/>
+<g>
+  <rect x="270" y="226" width="180" height="52" rx="8" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="360" y="246" text-anchor="middle" class="label" fill="#444441">DISCOVERY.md</text>
+  <text x="360" y="262" text-anchor="middle" class="sub" fill="#5f5e5a">stats globales · top topics</text>
+</g>
+
+<!-- ============ Phase 3 — Synthesize ============ -->
+<line x1="610" y1="284" x2="610" y2="320" class="arrow" marker-end="url(#arrow)"/>
+<text x="624" y="305" class="step">3</text>
+
+<g>
+  <rect x="510" y="320" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text x="610" y="342" text-anchor="middle" class="label" fill="#085041">synthesize</text>
+  <text x="610" y="358" text-anchor="middle" class="sub" fill="#0f6e56">2 appels LLM (depuis frontmatters)</text>
+  <text x="610" y="372" text-anchor="middle" class="sub" fill="#0f6e56">→ vue d'ensemble + plan</text>
+</g>
+
+<line x1="510" y1="338" x2="450" y2="318" class="arrow" marker-end="url(#arrow)"/>
+<g>
+  <rect x="270" y="296" width="180" height="36" rx="6" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="360" y="318" text-anchor="middle" class="label" fill="#444441">SUMMARY.md</text>
+</g>
+<line x1="510" y1="362" x2="450" y2="382" class="arrow" marker-end="url(#arrow)"/>
+<g>
+  <rect x="270" y="364" width="180" height="36" rx="6" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="360" y="386" text-anchor="middle" class="label" fill="#444441">PLAN.md</text>
+</g>
+
+<!-- ============ Phase 4 — Split ============ -->
+<line x1="610" y1="384" x2="610" y2="430" class="arrow" marker-end="url(#arrow)"/>
+<text x="624" y="410" class="step">4</text>
+
+<g>
+  <rect x="510" y="430" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text x="610" y="452" text-anchor="middle" class="label" fill="#085041">split</text>
+  <text x="610" y="468" text-anchor="middle" class="sub" fill="#0f6e56">PDFs : découpe par TOC + breadcrumbs</text>
+  <text x="610" y="482" text-anchor="middle" class="sub" fill="#0f6e56">Vidéos : segmentation LLM par sujet</text>
+</g>
+
+<line x1="510" y1="462" x2="470" y2="462" class="arrow" marker-end="url(#arrow)"/>
+<g>
+  <rect x="220" y="436" width="250" height="52" rx="8" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="345" y="456" text-anchor="middle" class="label" fill="#444441">media/{documents,videos}/chunks/</text>
+  <text x="345" y="472" text-anchor="middle" class="sub" fill="#5f5e5a">1 chunk = 1 fichier .md + frontmatter</text>
+</g>
+
+<!-- ============ Phase 5 — Classify ============ -->
+<line x1="610" y1="494" x2="610" y2="530" class="arrow" marker-end="url(#arrow)"/>
+<text x="624" y="515" class="step">5</text>
+
+<g>
+  <rect x="510" y="530" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text x="610" y="552" text-anchor="middle" class="label" fill="#085041">classify</text>
+  <text x="610" y="568" text-anchor="middle" class="sub" fill="#0f6e56">LLM affecte des catégories du PLAN</text>
+  <text x="610" y="582" text-anchor="middle" class="sub" fill="#0f6e56">à chaque source ET chaque chunk</text>
+</g>
+
+<line x1="510" y1="562" x2="450" y2="562" class="arrow" marker-end="url(#arrow)"/>
+<g>
+  <rect x="270" y="536" width="180" height="52" rx="8" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="360" y="556" text-anchor="middle" class="label" fill="#444441">INDEX.md</text>
+  <text x="360" y="572" text-anchor="middle" class="sub" fill="#5f5e5a">sources groupées par catégorie</text>
+</g>
+
+<!-- ============ Phase 6 — Embed ============ -->
+<line x1="610" y1="594" x2="610" y2="630" class="arrow" marker-end="url(#arrow)"/>
+<text x="624" y="615" class="step">6</text>
+
+<g>
+  <rect x="510" y="630" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text x="610" y="652" text-anchor="middle" class="label" fill="#085041">embed</text>
+  <text x="610" y="668" text-anchor="middle" class="sub" fill="#0f6e56">nomic-local (ONNX CPU, ~274 MB)</text>
+  <text x="610" y="682" text-anchor="middle" class="sub" fill="#0f6e56">ou nomic-uptimize / GPU pod</text>
+</g>
+
+<!-- Storage -->
+<line x1="610" y1="694" x2="610" y2="730" class="arrow-thick" marker-end="url(#arrow)"/>
+<g>
+  <rect x="440" y="730" width="340" height="68" rx="12" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+  <text x="610" y="754" text-anchor="middle" class="label" fill="#3c3489">workspace.db (SQLite WAL)</text>
+  <text x="610" y="772" text-anchor="middle" class="sub" fill="#534ab7">embeddings · sessions · messages · memories</text>
+  <text x="610" y="786" text-anchor="middle" class="sub" fill="#534ab7">app_settings · token_usage</text>
+</g>
+
+<!-- ============ SECTION 2: CHAT RAG ============ -->
+<text x="40" y="852" class="section">② Chat (online) — pnpm run chat → http://localhost:3000</text>
+<line x1="40" y1="860" x2="920" y2="860" stroke="#e5e4dc" stroke-width="1"/>
+
+<!-- User question -->
+<g>
+  <rect x="40" y="884" width="200" height="52" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+  <text x="140" y="904" text-anchor="middle" class="label" fill="#633806">Question utilisateur</text>
+  <text x="140" y="920" text-anchor="middle" class="sub" fill="#854f0b">via UI web ou terminal chat</text>
+</g>
+
+<line x1="240" y1="910" x2="290" y2="910" class="arrow" marker-end="url(#arrow)"/>
+<text x="265" y="900" text-anchor="middle" class="step">A</text>
+
+<!-- Embedding of query -->
+<g>
+  <rect x="290" y="884" width="170" height="52" rx="8" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text x="375" y="904" text-anchor="middle" class="label" fill="#085041">Embedding query</text>
+  <text x="375" y="920" text-anchor="middle" class="sub" fill="#0f6e56">même modèle que media</text>
+</g>
+
+<line x1="460" y1="910" x2="510" y2="910" class="arrow" marker-end="url(#arrow)"/>
+<text x="485" y="900" text-anchor="middle" class="step">B</text>
+
+<!-- Vector search -->
+<g>
+  <rect x="510" y="884" width="200" height="52" rx="8" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+  <text x="610" y="904" text-anchor="middle" class="label" fill="#3c3489">Recherche cosinus</text>
+  <text x="610" y="920" text-anchor="middle" class="sub" fill="#534ab7">top-K + min-score (in-memory)</text>
+</g>
+
+<!-- Pas de LLM badge -->
+<g>
+  <rect x="730" y="894" width="190" height="32" rx="6" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="825" y="914" text-anchor="middle" class="sub" fill="#5f5e5a">Pas d'appel LLM ici</text>
+</g>
+<line x1="710" y1="910" x2="730" y2="910" stroke="#73726c" stroke-width="0.5" stroke-dasharray="4 3"/>
+
+<!-- DB feeds vector search (curve) -->
+<path d="M610 798 Q610 840 610 884" class="arrow-thick" marker-end="url(#arrow)" fill="none"/>
+<text x="624" y="850" class="step">vecteurs chargés en RAM</text>
+
+<!-- Arrow down to context assembly -->
+<line x1="610" y1="936" x2="610" y2="970" class="arrow" marker-end="url(#arrow)"/>
+<text x="624" y="958" class="step">C</text>
+
+<!-- Context assembly -->
+<g>
+  <rect x="100" y="970" width="760" height="84" rx="12" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+  <text x="480" y="992" text-anchor="middle" class="label" fill="#444441">Assemblage du system prompt (multi-couches)</text>
+  <text x="480" y="1014" text-anchor="middle" class="sub" fill="#5f5e5a">instructions · domain · memories · catégories du PLAN · chunks RAG (top-K + deep search + focus)</text>
+  <text x="480" y="1030" text-anchor="middle" class="sub" fill="#5f5e5a">+ résumé de session compactée + N derniers messages</text>
+  <text x="480" y="1046" text-anchor="middle" class="sub" fill="#5f5e5a">deep search = sous-requêtes générées par LLM · focus = toute une catégorie du PLAN</text>
+</g>
+
+<!-- Arrow to LLM -->
+<line x1="480" y1="1054" x2="480" y2="1086" class="arrow" marker-end="url(#arrow)"/>
+<text x="494" y="1075" class="step">D</text>
+
+<!-- LLM call -->
+<g>
+  <rect x="280" y="1086" width="400" height="50" rx="8" fill="#faece7" stroke="#993c1d" stroke-width="0.5"/>
+  <text x="480" y="1106" text-anchor="middle" class="label" fill="#712b13">UPTIMIZE / Anthropic Claude (streaming SSE)</text>
+  <text x="480" y="1122" text-anchor="middle" class="sub" fill="#993c1d">1 appel par tour · sessions persistées · auto-compaction</text>
+</g>
+
+<!-- Final response -->
+<line x1="480" y1="1136" x2="480" y2="1156" class="arrow" marker-end="url(#arrow)"/>
+<g>
+  <rect x="290" y="1156" width="380" height="20" rx="6" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+  <text x="480" y="1170" text-anchor="middle" class="sub" fill="#633806">Réponse streamée avec citations · debug RAG dans le panneau latéral</text>
+</g>
+
+</svg>
