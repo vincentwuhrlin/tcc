@@ -13,11 +13,13 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
 
-import { API_PROVIDER, API_MODEL, CHAT_EMBED_ENGINE, CHAT_TOP_K, CHAT_MIN_SCORE, CHAT_DEEP_SEARCH, CHAT_API_STREAMING, CHAT_API_PROVIDER, CHAT_API_MODEL } from "@tcc/core/src/config.js";
+import { API_PROVIDER, API_MODEL, CHAT_EMBED_ENGINE, CHAT_TOP_K, CHAT_MIN_SCORE, CHAT_DEEP_SEARCH, CHAT_FOCUS_MAX_TOKENS, CHAT_COMPACTION_SUMMARY_TOKENS, CHAT_COMPACTION_THRESHOLD_TOKENS, CHAT_COMPACTION_WINDOW_TOKENS, CHAT_API_STREAMING, CHAT_API_PROVIDER, CHAT_API_MODEL } from "@tcc/core/src/config.js";
 import { getChatEmbedEngine, getMediaEmbedEngine } from "@tcc/core/src/common/embed/index.js";
-import { searchChunks, assembleContext, deepSearch, type SearchResult, type DeepSearchDebug } from "@tcc/core/src/common/rag.js";
-import { upsertEmbedding } from "@tcc/core/src/common/db.js";
+import { searchChunks, assembleContext, deepSearch, extractCategoriesFromResults, getChunksByCategories, type SearchResult, type DeepSearchDebug } from "@tcc/core/src/common/rag.js";
+import { upsertEmbedding, getUsageTotal, getUsageByKind, getUsageByDay, getUsageByProvider, getUsageBySession, addMemories, listMemories, getActiveMemories, setMemoryActive, updateMemory, deleteMemory, getMemoryStats, getBoolSetting, setSetting, getAllSettings } from "@tcc/core/src/common/db.js";
 import { llmCall, llmStreamCall, getChatLlmConfig } from "@tcc/core/src/common/llm.js";
+import { embedAndStoreMessage, searchMessages, backfillMessageEmbeddings, messageIndexSize } from "@tcc/core/src/common/history.js";
+import { getChatEmbedEngine } from "@tcc/core/src/common/embed/index.js";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -25,8 +27,7 @@ import * as wm from "./workspace-manager.js";
 import {
   createSession, getSession, listSessions, deleteSession, updateSessionTitle,
   getSessionMessages, addMessage, getMessageCount,
-  buildSessionContext, getMessagesToSummarize, saveCompactionSummary,
-  COMPACT_THRESHOLD, SLIDING_WINDOW_SIZE, COMPACT_INTERVAL,
+  buildSessionContext, getCompactionInput, saveCompactionSummary,
 } from "./sessions.js";
 
 const app = new Hono();
@@ -58,6 +59,21 @@ function buildSystemPrompt(
     parts.push("", "## Domain Context", "", wm.domainContent());
   }
 
+  // 2.5 Memories — persistent facts learned from prior conversations
+  //     Only injected if memories feature is enabled for this workspace.
+  if (getBoolSetting("memories_enabled", true)) {
+    const activeMemories = getActiveMemories();
+    if (activeMemories.length > 0) {
+      parts.push("", "## What you know about the user (from prior conversations)", "");
+      parts.push("These facts have been extracted from earlier sessions and persist across conversations. Use them naturally — do not announce that you are 'remembering' something, just incorporate the knowledge.");
+      parts.push("");
+      for (const mem of activeMemories) {
+        const categoryTag = mem.category ? ` _(${mem.category})_` : "";
+        parts.push(`- ${mem.content}${categoryTag}`);
+      }
+    }
+  }
+
   // 3. Plan categories — compact table of contents (headers only)
   if (wm.planHeaders()) {
     parts.push("", "## Knowledge Base Categories", "", wm.planHeaders());
@@ -83,31 +99,159 @@ function buildSystemPrompt(
 }
 
 // ── Compaction ───────────────────────────────────────────────────────
-const COMPACTION_SYSTEM = `You are a conversation summarizer. Given a chat history between a user and a technical assistant about an industrial knowledge base, produce a concise summary (~150-200 words) that captures:
-1. The main topics discussed
-2. Key conclusions or answers found
-3. The user's specific context or setup (e.g. hardware, network, configuration)
-4. Any unresolved questions
+const COMPACTION_SYSTEM = `You are producing a structured summary of a conversation that will be used to continue the discussion in a new context window. The summary replaces the full message history — so it MUST preserve every piece of information the assistant would need to continue seamlessly.
 
-Write in English, past tense. Do NOT include greetings or meta-commentary. Just the facts.`;
+Preserve aggressively:
+1. The user's goals, ongoing tasks, and current focus
+2. Every key technical decision and the reasoning behind it
+3. Specific identifiers: file paths, function names, env var names, model names, URLs, IP addresses, ports, versions
+4. Code snippets, config fragments, command invocations
+5. Concepts, acronyms, and tools introduced (with their meaning)
+6. Open questions, planned next steps, and unresolved issues
+7. Any personal or organizational context about the user
+
+Format as Markdown with these sections (omit sections that are empty):
+
+## Context
+One dense paragraph: what the user is working on, why, and the current state.
+
+## Topics discussed
+- Bullet list of the major topics covered, in chronological order
+
+## Decisions and conclusions
+- Concrete decisions made, with rationale where relevant
+
+## Code and technical details
+- File paths, function names, env vars, configurations, commands, URLs
+- Preserve exact names and values — no paraphrasing of identifiers
+
+## Open questions / next steps
+- What is still to be done, clarified, or tested
+
+Be dense and precise. Prefer specific names, numbers, and quotations over vague descriptions. Do NOT use meta-commentary ("the user asked about...", "we discussed...") — state facts directly. Do NOT add a preamble or closing remark. Output only the Markdown summary.
+
+If an existing summary is provided, treat it as authoritative for earlier parts of the conversation and merge it with the new messages into a single updated summary that covers everything. Do not lose information from the existing summary.`;
 
 async function generateCompactionSummary(sessionId: string): Promise<string> {
-  const messagesToSummarize = getMessagesToSummarize(sessionId);
-  if (messagesToSummarize.length === 0) return "";
+  const { existingSummary, newMessages, newCount } = getCompactionInput(sessionId);
+  if (newMessages.length === 0) return existingSummary ?? "";
 
-  const conversation = messagesToSummarize
+  const conversation = newMessages
     .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
     .join("\n\n");
 
-  const totalMessages = getMessageCount(sessionId);
+  // Build the user message: existing summary (if any) + new messages
+  let userMessage: string;
+  if (existingSummary) {
+    userMessage =
+      `# Existing summary (authoritative for earlier parts of the conversation)\n\n` +
+      `${existingSummary}\n\n` +
+      `---\n\n` +
+      `# New messages to incorporate into the summary\n\n` +
+      `${conversation}\n\n` +
+      `---\n\n` +
+      `Produce an updated structured summary that merges the existing summary with the new messages. Do not lose information from the existing summary.`;
+  } else {
+    userMessage =
+      `# Conversation to summarize\n\n` +
+      `${conversation}\n\n` +
+      `---\n\n` +
+      `Produce a structured summary of this conversation following the format in the system prompt.`;
+  }
 
-  console.log(`  📝 Compacting session ${sessionId}: ${messagesToSummarize.length} messages → summary`);
+  console.log(`  📝 Compacting session ${sessionId}: ${newMessages.length} new messages${existingSummary ? " (rolling)" : ""} → summary`);
   const t0 = Date.now();
-  const summary = await llmCall(COMPACTION_SYSTEM, conversation, 512, getChatLlmConfig());
-  console.log(`  📝 Compaction done in ${Date.now() - t0}ms (${summary.length} chars)`);
+  const { text: summary } = await llmCall(COMPACTION_SYSTEM, userMessage, CHAT_COMPACTION_SUMMARY_TOKENS, getChatLlmConfig(), { sessionId, kind: "compaction" });
+  console.log(`  📝 Compaction done in ${Date.now() - t0}ms (${summary.length} chars, covers ${newCount} messages)`);
 
-  saveCompactionSummary(sessionId, summary, totalMessages);
+  saveCompactionSummary(sessionId, summary, newCount);
   return summary;
+}
+
+// ── Memory extraction ──────────────────────────────────────────────
+const MEMORY_EXTRACTION_SYSTEM = `You extract durable, persistent facts about the user from a conversation summary. These facts will be injected into all future conversations with this user, so they must be things that remain true over time.
+
+Extract 0 to 5 facts in these categories:
+- **personal**: name, location, organization, role, background
+- **project**: ongoing projects, their names and states, tech stacks
+- **preference**: tools, languages, coding style, communication preferences
+- **technical**: recurring technical decisions, environment setup, versions in use
+- **context**: colleagues, collaborators, domain-specific vocabulary
+
+DO NOT extract:
+- Temporary or one-off things ("user is currently debugging X")
+- Conversation meta ("user asked about Y")
+- Things the assistant told the user
+- Anything the user explicitly asked you to forget
+- Sensitive data (credentials, personal IDs)
+
+Each fact must be:
+- A complete, standalone statement (readable without context)
+- Specific (no "the user likes things")
+- Under 200 characters
+- Phrased in third person ("Vincent works at...", not "works at...")
+
+Output ONLY a JSON array (no preamble, no code fences):
+[
+  { "content": "Vincent works at Merck KTSO in Rosheim, France", "category": "personal" },
+  { "content": "Primary project is TCC, a TypeScript RAG tool", "category": "project" }
+]
+
+If there are no durable facts worth extracting, output an empty array: []`;
+
+interface ExtractedMemory {
+  content: string;
+  category: string;
+}
+
+/** Extract durable memories from a session's summary and insert them into the memories table. */
+async function extractMemoriesFromSession(sessionId: string, summary: string): Promise<number> {
+  if (!summary || summary.length < 100) return 0;
+
+  // Dedup against existing active memories — provide them to the LLM so it doesn't re-extract the same facts
+  const existing = getActiveMemories();
+  const existingBlock = existing.length > 0
+    ? `\n\n# Existing memories (do NOT re-extract these)\n${existing.map((m) => `- ${m.content}`).join("\n")}`
+    : "";
+
+  const userMessage = `# Conversation summary\n\n${summary}${existingBlock}\n\n---\n\nExtract new durable facts about the user from this summary. Do not repeat any existing memory. Return a JSON array.`;
+
+  try {
+    const { text } = await llmCall(
+      MEMORY_EXTRACTION_SYSTEM,
+      userMessage,
+      1024,
+      getChatLlmConfig(),
+      { sessionId, kind: "memory_extract" },
+    );
+
+    // Strip potential code fences
+    const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const parsed = JSON.parse(cleaned) as ExtractedMemory[];
+
+    if (!Array.isArray(parsed) || parsed.length === 0) return 0;
+
+    // Filter invalid entries
+    const valid = parsed.filter(
+      (m) => m && typeof m.content === "string" && m.content.trim().length > 0 && m.content.length <= 300,
+    );
+
+    if (valid.length === 0) return 0;
+
+    addMemories(
+      valid.map((m) => ({
+        content: m.content.trim(),
+        category: m.category ?? null,
+        sourceSessionId: sessionId,
+      })),
+    );
+
+    console.log(`  🧠 Extracted ${valid.length} new memor${valid.length === 1 ? "y" : "ies"} from session ${sessionId}`);
+    return valid.length;
+  } catch (err) {
+    console.error(`  ⚠️  Memory extraction failed: ${err instanceof Error ? err.message : err}`);
+    return 0;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -193,7 +337,9 @@ app.post("/api/chat", async (c) => {
     createSession(undefined, sessionId);
   }
 
-  addMessage(sessionId, "user", message);
+  const userMsg = addMessage(sessionId, "user", message);
+  // Fire-and-forget: embed the user message for semantic history search
+  embedAndStoreMessage(userMsg.id, message).catch(() => {});
 
   const t0 = Date.now();
   let ragContext = "";
@@ -222,7 +368,10 @@ app.post("/api/chat", async (c) => {
           message,
           ragResults,
           (text) => engine.embedQuery(text),
-          (system, user, maxTokens) => llmCall(system, user, maxTokens, chatConfig),
+          async (system, user, maxTokens) => {
+            const { text } = await llmCall(system, user, maxTokens, chatConfig, { sessionId, kind: "deep_search" });
+            return text;
+          },
           CHAT_TOP_K,
           CHAT_MIN_SCORE,
         );
@@ -243,30 +392,61 @@ app.post("/api/chat", async (c) => {
 
   // Session context (sliding window + compaction)
   const ctx = buildSessionContext(sessionId);
-  let summary = ctx.summary;
+  // Note: compaction is run INSIDE the SSE stream below so we can emit
+  // progress events to the client. Until then, summary is just the existing one.
 
-  if (ctx.needsCompaction && ctx.totalMessages > COMPACT_THRESHOLD) {
-    try {
-      summary = await generateCompactionSummary(sessionId);
-    } catch (err) {
-      console.error(`⚠️  Compaction failed: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  const recentWithoutCurrent = ctx.recentMessages.slice(0, -1);
-  const systemPrompt = buildSystemPrompt(ragContext, summary, recentWithoutCurrent);
+  // Extract focus categories from RAG results (for Focus pills in UI)
+  const focusCategories = ragResults.length > 0
+    ? extractCategoriesFromResults(ragResults, wm.planHeaders())
+    : [];
 
   // SSE streaming response
   return streamSSE(c, async (stream) => {
-    // 1. Send metadata (sources, RAG timing, context info)
+    // 1. Send metadata (sources, RAG timing, context info, focus categories)
     await stream.writeSSE({
       data: JSON.stringify({
         type: "meta",
         sources,
         timing: { embed_ms: embedMs, search_ms: searchMs },
-        context: { totalMessages: ctx.totalMessages + 2, hasCompaction: !!summary, windowSize: ctx.recentMessages.length - 1 },
+        context: { totalMessages: ctx.totalMessages + 2, hasCompaction: !!ctx.summary, windowSize: ctx.recentMessages.length - 1, willCompact: ctx.needsCompaction },
+        focusCategories,
       }),
     });
+
+    // 1.5 Run compaction if needed — emit progress events so the UI can show the step
+    let summary = ctx.summary;
+    if (ctx.needsCompaction) {
+      const tCompact = Date.now();
+      await stream.writeSSE({ data: JSON.stringify({ type: "compacting" }) });
+      try {
+        summary = await generateCompactionSummary(sessionId);
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: "compacted",
+            ms: Date.now() - tCompact,
+            summaryLength: summary.length,
+          }),
+        });
+        // Fire-and-forget memory extraction — only if memories are enabled
+        if (summary && getBoolSetting("memories_enabled", true)) {
+          extractMemoriesFromSession(sessionId, summary).catch((err) => {
+            console.error(`⚠️  Memory extraction failed: ${err instanceof Error ? err.message : err}`);
+          });
+        }
+      } catch (err) {
+        console.error(`⚠️  Compaction failed: ${err instanceof Error ? err.message : err}`);
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: "compacted",
+            ms: Date.now() - tCompact,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        });
+      }
+    }
+
+    const recentWithoutCurrent = ctx.recentMessages.slice(0, -1);
+    const systemPrompt = buildSystemPrompt(ragContext, summary, recentWithoutCurrent);
 
     // 2. Send debug diagnostic (full RAG chunks, prompt breakdown, config)
     const chatConfig = getChatLlmConfig();
@@ -320,21 +500,23 @@ app.post("/api/chat", async (c) => {
     try {
       if (CHAT_API_STREAMING) {
         // Stream tokens from LLM → pipe as SSE delta events
-        const { textStream } = llmStreamCall(systemPrompt, message, 4096, chatConfig);
+        const { textStream } = llmStreamCall(systemPrompt, message, 4096, chatConfig, { sessionId, kind: "chat" });
         for await (const chunk of textStream) {
           fullText += chunk;
           await stream.writeSSE({ data: JSON.stringify({ type: "delta", text: chunk }) });
         }
       } else {
         // Wait for full response → send as single SSE delta event
-        fullText = await llmCall(systemPrompt, message, 4096, chatConfig);
+        const result = await llmCall(systemPrompt, message, 4096, chatConfig, { sessionId, kind: "chat" });
+        fullText = result.text;
         await stream.writeSSE({ data: JSON.stringify({ type: "delta", text: fullText }) });
       }
 
       const llmMs = Date.now() - tl;
 
-      // 3. Save complete response to DB
-      addMessage(sessionId, "assistant", fullText);
+      // 3. Save complete response to DB + embed for history search
+      const assistantMsg = addMessage(sessionId, "assistant", fullText);
+      embedAndStoreMessage(assistantMsg.id, fullText).catch(() => {});
 
       // 4. Send done event with final timing
       await stream.writeSSE({
@@ -346,6 +528,163 @@ app.post("/api/chat", async (c) => {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`❌ LLM stream error: ${errorMsg}`);
+      await stream.writeSSE({
+        data: JSON.stringify({ type: "error", message: errorMsg }),
+      });
+    }
+  });
+});
+
+// ── Focus: deep-dive into a category ────────────────────────────────
+// Loads ALL chunks from selected categories, re-runs LLM with full context.
+
+app.post("/api/chat/focus", async (c) => {
+  const body = await c.req.json<{ sessionId: string; message: string; category: string }>();
+  const { sessionId, message, category } = body;
+
+  if (!message?.trim()) return c.json({ error: "No message provided" }, 400);
+  if (!category?.trim()) return c.json({ error: "No category provided" }, 400);
+  if (!sessionId) return c.json({ error: "No sessionId provided" }, 400);
+
+  // Auto-create session if needed
+  if (!getSession(sessionId)) {
+    createSession(undefined, sessionId);
+  }
+
+  const t0 = Date.now();
+
+  // Load all chunks for the selected category
+  const categoryChunks = getChunksByCategories([category]);
+  const focusContext = assembleContext(categoryChunks, CHAT_FOCUS_MAX_TOKENS * 4);
+
+  // Build a Focus-specific system prompt
+  const focusSystemParts: string[] = [];
+  focusSystemParts.push(wm.instructionsContent() || DEFAULT_INSTRUCTIONS);
+
+  if (wm.domainContent()) {
+    focusSystemParts.push("", "## Domain Context", "", wm.domainContent());
+  }
+
+  focusSystemParts.push(
+    "",
+    `## Focus Mode — Category ${category} (${categoryChunks.length} chunks loaded)`,
+    "",
+    "You have access to ALL documents from this category. Provide an exhaustive, detailed answer.",
+    "",
+    focusContext,
+  );
+
+  // Add session context
+  const ctx = buildSessionContext(sessionId);
+  const recentWithoutCurrent = ctx.recentMessages.slice(0, -1);
+  if (recentWithoutCurrent.length > 0) {
+    focusSystemParts.push("", "## Recent Conversation");
+    for (const msg of recentWithoutCurrent) {
+      focusSystemParts.push("", `**${msg.role === "user" ? "User" : "Assistant"}:** ${msg.content}`);
+    }
+  }
+
+  const systemPrompt = focusSystemParts.join("\n");
+
+  // Add focus message to session
+  const focusMessage = `[Focus: ${category}] ${message}`;
+  const focusUserMsg = addMessage(sessionId, "user", focusMessage);
+  embedAndStoreMessage(focusUserMsg.id, focusMessage).catch(() => {});
+
+  // SSE streaming response
+  return streamSSE(c, async (stream) => {
+    // 1. Meta
+    const uniqueSources = new Map<string, number>();
+    for (const ch of categoryChunks) {
+      if (!uniqueSources.has(ch.source)) uniqueSources.set(ch.source, 1);
+    }
+
+    await stream.writeSSE({
+      data: JSON.stringify({
+        type: "meta",
+        sources: [...uniqueSources.keys()].slice(0, 20).map((s) => ({ source: s, score: 1.0 })),
+        timing: { embed_ms: 0, search_ms: 0 },
+        context: { totalMessages: ctx.totalMessages + 2, hasCompaction: false, windowSize: recentWithoutCurrent.length },
+        focus: { category, totalChunks: categoryChunks.length, contextChars: focusContext.length },
+      }),
+    });
+
+    // 2. Debug
+    const chatConfig = getChatLlmConfig();
+    await stream.writeSSE({
+      data: JSON.stringify({
+        type: "debug",
+        query: focusMessage,
+        rag: {
+          totalChunks: wm.ragChunkCount(),
+          returned: categoryChunks.length,
+          topK: categoryChunks.length,
+          minScore: 0,
+          chunks: categoryChunks.slice(0, 50).map((r) => ({
+            id: r.id,
+            source: r.source,
+            score: 1.0,
+            chars: r.content.length,
+            preview: r.content.slice(0, 300),
+          })),
+        },
+        prompt: {
+          totalChars: systemPrompt.length,
+          instructions: wm.instructionsContent().length,
+          domain: wm.domainContent().length,
+          plan: 0,
+          ragContext: focusContext.length,
+          history: recentWithoutCurrent.reduce((s, m) => s + m.content.length, 0),
+          summary: 0,
+        },
+        session: {
+          id: sessionId,
+          totalMessages: ctx.totalMessages + 1,
+          windowSize: recentWithoutCurrent.length,
+          hasCompaction: false,
+          needsCompaction: false,
+        },
+        config: {
+          provider: chatConfig.provider,
+          model: chatConfig.model,
+          streaming: CHAT_API_STREAMING,
+          embedEngine: CHAT_EMBED_ENGINE,
+        },
+        deepSearch: { enabled: false, subQueries: [], pass1Count: 0, pass2Count: 0, mergedCount: 0, deduped: 0, timings: { subQueryGenMs: 0, pass2EmbedMs: 0, pass2SearchMs: 0, totalMs: 0 } },
+        focus: { category, totalChunks: categoryChunks.length, contextChars: focusContext.length },
+      }),
+    });
+
+    // 3. LLM response
+    let fullText = "";
+    const tl = Date.now();
+
+    try {
+      if (CHAT_API_STREAMING) {
+        const { textStream } = llmStreamCall(systemPrompt, message, 4096, chatConfig, { sessionId, kind: "focus" });
+        for await (const chunk of textStream) {
+          fullText += chunk;
+          await stream.writeSSE({ data: JSON.stringify({ type: "delta", text: chunk }) });
+        }
+      } else {
+        const result = await llmCall(systemPrompt, message, 4096, chatConfig, { sessionId, kind: "focus" });
+        fullText = result.text;
+        await stream.writeSSE({ data: JSON.stringify({ type: "delta", text: fullText }) });
+      }
+
+      const llmMs = Date.now() - tl;
+      const focusAssistantMsg = addMessage(sessionId, "assistant", fullText);
+      embedAndStoreMessage(focusAssistantMsg.id, fullText).catch(() => {});
+
+      await stream.writeSSE({
+        data: JSON.stringify({
+          type: "done",
+          timing: { embed_ms: 0, search_ms: 0, llm_ms: llmMs, total_ms: Date.now() - t0 },
+        }),
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(`❌ Focus LLM error: ${errorMsg}`);
       await stream.writeSSE({
         data: JSON.stringify({ type: "error", message: errorMsg }),
       });
@@ -395,7 +734,7 @@ Respond ONLY with valid JSON, no markdown fences, no preamble.`;
   const userMsg = `## Question\n${question}\n\n## Answer\n${answer}`;
 
   try {
-    const raw = await llmCall(systemPrompt, userMsg, 1024, getChatLlmConfig());
+    const { text: raw } = await llmCall(systemPrompt, userMsg, 1024, getChatLlmConfig(), { sessionId: null, kind: "qa_prepare" });
     const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
     const result = JSON.parse(cleaned) as { title: string; category: string; condensed: string };
 
@@ -500,7 +839,11 @@ app.get("/api/health", (c) =>
     hasDomain: !!wm.domainContent(),
     hasPlan: !!wm.planHeaders(),
     workspace: wm.currentWorkspace().id,
-    compaction: { threshold: COMPACT_THRESHOLD, windowSize: SLIDING_WINDOW_SIZE, interval: COMPACT_INTERVAL },
+    compaction: {
+      triggerTokens: CHAT_COMPACTION_THRESHOLD_TOKENS,
+      slidingWindowTokens: CHAT_COMPACTION_WINDOW_TOKENS,
+      summaryMaxTokens: CHAT_COMPACTION_SUMMARY_TOKENS,
+    },
   }),
 );
 
@@ -513,8 +856,185 @@ app.get("/api/workspace/stats", (c) => {
   return c.json(stats);
 });
 
+// ── Token usage stats ───────────────────────────────────────────────
+
+/** Overall token usage + breakdowns by kind, provider, and day. */
+app.get("/api/usage", (c) => {
+  const days = parseInt(c.req.query("days") ?? "30", 10);
+  return c.json({
+    total:      getUsageTotal(),
+    byKind:     getUsageByKind(),
+    byProvider: getUsageByProvider(),
+    byDay:      getUsageByDay(days),
+  });
+});
+
+/** Per-session usage total. */
+app.get("/api/usage/session/:id", (c) => {
+  const id = c.req.param("id");
+  return c.json(getUsageBySession(id));
+});
+
+// ── Memories (cross-session persistent facts) ───────────────────────
+
+/** List all memories (active and inactive). */
+app.get("/api/memories", (c) => {
+  return c.json({
+    memories: listMemories(),
+    stats: getMemoryStats(),
+  });
+});
+
+/** Toggle a memory's active state. */
+app.patch("/api/memories/:id", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
+  const body = await c.req.json() as { active?: boolean; content?: string; category?: string | null };
+
+  if (body.active !== undefined) {
+    setMemoryActive(id, body.active);
+  }
+  if (body.content !== undefined || body.category !== undefined) {
+    updateMemory(id, { content: body.content, category: body.category });
+  }
+  return c.json({ ok: true });
+});
+
+/** Delete a memory permanently. */
+app.delete("/api/memories/:id", (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return c.json({ error: "Invalid id" }, 400);
+  deleteMemory(id);
+  return c.json({ ok: true });
+});
+
+/** Manually create a memory. */
+app.post("/api/memories", async (c) => {
+  const body = await c.req.json() as { content: string; category?: string };
+  if (!body.content || typeof body.content !== "string") {
+    return c.json({ error: "content required" }, 400);
+  }
+  const id = addMemories([{ content: body.content, category: body.category ?? null }])[0];
+  return c.json({ id, ok: true }, 201);
+});
+
+/** Manually trigger memory extraction on a session. Forces a full summary
+ *  of ALL messages (ignores sliding window), then extracts memories from it. */
+app.post("/api/memories/extract/:sessionId", async (c) => {
+  const sessionId = c.req.param("sessionId");
+  const allMessages = getSessionMessages(sessionId);
+
+  if (allMessages.length === 0) {
+    return c.json({ error: "Session has no messages yet" }, 400);
+  }
+
+  // Build conversation from ALL messages (no sliding window filtering)
+  const conversation = allMessages
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n\n");
+
+  const userMessage =
+    `# Conversation to summarize\n\n` +
+    `${conversation}\n\n` +
+    `---\n\n` +
+    `Produce a structured summary of this conversation following the format in the system prompt.`;
+
+  try {
+    const { text: summary } = await llmCall(
+      COMPACTION_SYSTEM,
+      userMessage,
+      CHAT_COMPACTION_SUMMARY_TOKENS,
+      getChatLlmConfig(),
+      { sessionId, kind: "compaction" },
+    );
+
+    if (!summary || summary.length < 50) {
+      return c.json({ error: "Summary too short to extract meaningful memories" }, 400);
+    }
+
+    const count = await extractMemoriesFromSession(sessionId, summary);
+    return c.json({ extracted: count, summaryLength: summary.length });
+  } catch (err) {
+    return c.json({ error: `Extraction failed: ${err instanceof Error ? err.message : err}` }, 500);
+  }
+});
+
+// ── App settings (workspace-scoped key/value config) ────────────────
+
+/** Get all app settings. Typed booleans are normalized for the client. */
+app.get("/api/settings", (c) => {
+  return c.json({
+    memoriesEnabled: getBoolSetting("memories_enabled", true),
+    raw: getAllSettings(),
+  });
+});
+
+/** Update one or more app settings. Booleans are stored as "true"/"false" strings. */
+app.post("/api/settings", async (c) => {
+  const body = await c.req.json() as Record<string, string | boolean | number>;
+  for (const [key, value] of Object.entries(body)) {
+    const str = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
+    setSetting(key, str);
+  }
+  return c.json({ ok: true });
+});
+
+// ── Semantic history search ──────────────────────────────────────────
+
+/** Search across all messages of all sessions in the current workspace. */
+app.get("/api/history/search", async (c) => {
+  const q = c.req.query("q")?.trim();
+  const limit = parseInt(c.req.query("limit") ?? "20", 10);
+  const minScore = parseFloat(c.req.query("min_score") ?? "0.3");
+
+  if (!q || q.length < 2) {
+    return c.json({ results: [], indexed: messageIndexSize() });
+  }
+
+  try {
+    const engine = await getChatEmbedEngine();
+    const queryVector = await engine.embedQuery(q);
+    const results = searchMessages(queryVector, limit, minScore);
+    return c.json({ results, indexed: messageIndexSize(), query: q });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+/** Backfill embeddings for all existing messages that don't have one yet. */
+app.post("/api/history/backfill", async (c) => {
+  try {
+    const engine = await getChatEmbedEngine();
+    const info = engine.info();
+    // Get all messages from all sessions
+    const db = (await import("@tcc/core/src/common/db.js")).getDb();
+    const allMessages = db.prepare("SELECT id, content FROM messages ORDER BY id ASC").all() as { id: number; content: string }[];
+
+    const result = await backfillMessageEmbeddings(info.model, () => allMessages);
+    return c.json({ ...result, total: allMessages.length, indexed: messageIndexSize() });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+/** Stats about the history index (total messages, embedded count). */
+app.get("/api/history/stats", async (c) => {
+  const { getHistoryStats } = await import("@tcc/core/src/common/db.js");
+  return c.json({
+    ...getHistoryStats(),
+    indexed: messageIndexSize(),
+  });
+});
+
 // ── Start ───────────────────────────────────────────────────────────
-const port = parseInt(process.env.PORT ?? "3001", 10);
+// API_PORT = backend API port (Hono server, what this file runs)
+// WEB_PORT = user-facing UI port (Vite dev server), shown in banner
+// HOST     = bind host for the UI (default localhost)
+const apiPort = parseInt(process.env.API_PORT ?? "3001", 10);
+const uiHost = process.env.HOST ?? "localhost";
+const uiPort = parseInt(process.env.WEB_PORT ?? "3000", 10);
+// If user bound to 0.0.0.0, display "localhost" in the banner (browsable URL)
+const displayHost = uiHost === "0.0.0.0" || uiHost === "" ? "localhost" : uiHost;
 
 const W = 44;
 const line = (icon: string, text: string) => {
@@ -531,17 +1051,21 @@ console.log(sep);
 console.log(line("🤖", `LLM: ${CHAT_API_PROVIDER} / ${CHAT_API_MODEL}`));
 console.log(line("🧲", `Embed: ${CHAT_EMBED_ENGINE} (min ${(CHAT_MIN_SCORE * 100).toFixed(0)}%)`));
 console.log(line("⚡", `Stream: ${CHAT_API_STREAMING ? "ON" : "OFF"}`));
-console.log(line("📝", `Compaction: >${COMPACT_THRESHOLD} msgs → summ + ${SLIDING_WINDOW_SIZE} recent`));
+console.log(line("📝", `Compact: >${(CHAT_COMPACTION_THRESHOLD_TOKENS / 1000).toFixed(0)}k tok → ${(CHAT_COMPACTION_WINDOW_TOKENS / 1000).toFixed(0)}k window`));
 console.log(sep);
 
 await wm.init();
 
 console.log(sep);
 
-serve({ fetch: app.fetch, port }, () => {
+// The API server always binds to loopback only — never exposed to the network
+// directly. If user sets HOST=0.0.0.0 to expose the UI on the LAN, the
+// Vite dev server still proxies /api/* to 127.0.0.1:apiPort internally.
+serve({ fetch: app.fetch, port: apiPort, hostname: "127.0.0.1" }, () => {
   const ws = wm.currentWorkspace();
   console.log(line("📂", `${ws.name}: ${ws.title}`));
-  console.log(line("📡", `http://localhost:${port}`));
+  console.log(line("🌐", `http://${displayHost}:${uiPort}`));
+  console.log(line("🔌", `API: :${apiPort}`));
   if (wm.allWorkspaces().length > 1) {
     console.log(sep);
     for (const w of wm.allWorkspaces()) {

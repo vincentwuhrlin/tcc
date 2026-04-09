@@ -8,6 +8,8 @@
  */
 import { loadEmbeddings, type StoredEmbedding } from "./db.js";
 import { CHAT_MIN_SCORE } from "../config.js";
+import { readdirSync, existsSync, openSync, readSync, closeSync } from "fs";
+import { join } from "path";
 
 // ── Cosine similarity ───────────────────────────────────────────────
 
@@ -50,11 +52,172 @@ export function loadIndex(model: string): number {
 export function clearIndex(): void {
   _cache = null;
   _cacheModel = null;
+  _chunkToCategories = null;
+  _categoryToChunks = null;
 }
 
 /** Return the currently loaded model name, or null. */
 export function currentModel(): string | null {
   return _cacheModel;
+}
+
+// ── Category index ───────────────────────────────────────────────────
+// Maps chunk IDs ↔ categories for Focus mode.
+// Built at startup by scanning chunk frontmatters on disk.
+
+let _chunkToCategories: Map<string, string[]> | null = null;
+let _categoryToChunks: Map<string, Set<string>> | null = null;
+
+/**
+ * Build category index from chunk frontmatters on disk.
+ * Scans all .md files in documents/chunks/ and videos/chunks/ for YAML
+ * frontmatter with `chunk_categories` or `categories` fields.
+ *
+ * @param outputDir — absolute path to media/output/ in the workspace
+ *                   (chunks live in {outputDir}/documents/chunks/ and
+ *                   {outputDir}/videos/chunks/)
+ */
+export function buildCategoryIndex(outputDir: string): { categories: number; chunks: number } {
+  _chunkToCategories = new Map();
+  _categoryToChunks = new Map();
+
+  if (!existsSync(outputDir)) {
+    return { categories: 0, chunks: 0 };
+  }
+
+  // Scan both documents/chunks and videos/chunks
+  for (const sub of ["documents", "videos"]) {
+    const chunksDir = join(outputDir, sub, "chunks");
+    if (!existsSync(chunksDir)) continue;
+
+    const files = readdirSync(chunksDir).filter((f) => f.endsWith(".md"));
+
+    for (const file of files) {
+      try {
+        // Read only first 2KB — frontmatter is always at the top
+        const fd = openSync(join(chunksDir, file), "r");
+        const buf = Buffer.alloc(2048);
+        const bytesRead = readSync(fd, buf, 0, 2048, 0);
+        closeSync(fd);
+        const head = buf.toString("utf-8", 0, bytesRead);
+
+        const fmMatch = head.match(/^---\n([\s\S]*?)\n---/);
+        if (!fmMatch) continue;
+
+        // Parse categories from YAML frontmatter
+        const cats: string[] = [];
+        let inCats = false;
+        for (const line of fmMatch[1].split("\n")) {
+          if (/^(chunk_categories|categories):/.test(line)) {
+            inCats = true;
+            continue;
+          }
+          if (inCats && /^\s+-\s/.test(line)) {
+            const val = line.replace(/^\s+-\s*"?/, "").replace(/"?\s*$/, "").trim();
+            if (val) cats.push(val);
+          } else if (inCats && /^\w/.test(line)) {
+            inCats = false;
+          }
+        }
+
+        if (cats.length === 0) continue;
+
+        // Chunk ID matches the format used by embed.ts: "{sub}/chunks/{filename}"
+        const chunkId = `${sub}/chunks/${file}`;
+        _chunkToCategories.set(chunkId, cats);
+
+        for (const cat of cats) {
+          if (!_categoryToChunks.has(cat)) {
+            _categoryToChunks.set(cat, new Set());
+          }
+          _categoryToChunks.get(cat)!.add(chunkId);
+        }
+      } catch { /* skip unreadable files */ }
+    }
+  }
+
+  return { categories: _categoryToChunks.size, chunks: _chunkToCategories.size };
+}
+
+/**
+ * Get all embeddings for the given category codes.
+ * Returns chunks sorted by source name for consistent ordering.
+ */
+export function getChunksByCategories(categoryCodes: string[]): SearchResult[] {
+  if (!_cache || !_categoryToChunks) return [];
+
+  // Collect all chunk IDs matching any of the requested categories
+  const matchingIds = new Set<string>();
+  for (const code of categoryCodes) {
+    // Match exact code and all sub-categories (e.g. "B" matches "B.1", "B.2", etc.)
+    for (const [cat, ids] of _categoryToChunks) {
+      if (cat === code || cat.startsWith(code + ".") || cat.charAt(0) === code) {
+        for (const id of ids) matchingIds.add(id);
+      }
+    }
+  }
+
+  // Find matching embeddings
+  const results: SearchResult[] = [];
+  for (const emb of _cache) {
+    if (matchingIds.has(emb.id)) {
+      results.push({
+        id: emb.id,
+        source: emb.source,
+        content: emb.content,
+        score: 1.0, // Not from similarity search — score = 1 means "full category match"
+      });
+    }
+  }
+
+  results.sort((a, b) => a.source.localeCompare(b.source));
+  return results;
+}
+
+/**
+ * Extract unique main categories (letter-level) from search results.
+ * Uses the category index to look up each chunk's categories.
+ * Returns sorted array of unique main category codes with their full names.
+ */
+export function extractCategoriesFromResults(
+  results: SearchResult[],
+  planHeaders: string,
+): { code: string; name: string; chunkCount: number }[] {
+  if (!_chunkToCategories || !_categoryToChunks) return [];
+
+  // Collect all categories from the result chunks
+  const mainCatCounts = new Map<string, number>();
+  for (const r of results) {
+    const cats = _chunkToCategories.get(r.id);
+    if (!cats) continue;
+    for (const cat of cats) {
+      // Extract main category letter: "B.1" → "B", "C.5" → "C"
+      const main = cat.charAt(0);
+      mainCatCounts.set(main, (mainCatCounts.get(main) ?? 0) + 1);
+    }
+  }
+
+  // Build lookup from plan headers: "A. Platform Overview..." → { code: "A", name: "Platform Overview..." }
+  const planLookup = new Map<string, string>();
+  for (const line of planHeaders.split("\n")) {
+    const m = line.trim().match(/^([A-Z])[\.\s]+(.+)/);
+    if (m) planLookup.set(m[1], m[2].trim());
+  }
+
+  // Build result
+  const cats = [...mainCatCounts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, chunkCount]) => ({
+      code,
+      name: planLookup.get(code) ?? code,
+      chunkCount: _categoryToChunks
+        ? [...(_categoryToChunks.entries())]
+            .filter(([cat]) => cat.charAt(0) === code)
+            .reduce((sum, [, ids]) => sum + ids.size, 0)
+        : chunkCount,
+    }));
+
+  return cats;
 }
 
 /**

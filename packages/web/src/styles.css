@@ -908,6 +908,27 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Highlight pulse when navigating from history search ─────────── */
+.message.msg-highlight {
+  animation: msg-highlight-pulse 2.5s ease-out;
+  border-radius: 8px;
+}
+
+@keyframes msg-highlight-pulse {
+  0% {
+    background: rgba(0, 133, 124, 0.25);
+    box-shadow: 0 0 0 3px rgba(0, 133, 124, 0.5);
+  }
+  30% {
+    background: rgba(0, 133, 124, 0.15);
+    box-shadow: 0 0 0 2px rgba(0, 133, 124, 0.35);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 rgba(0, 133, 124, 0);
+  }
+}
+
 /* ── User message — right-aligned purple bubble ──────────────────── */
 .message-user {
   display: flex;

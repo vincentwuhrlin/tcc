@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface Session {
   id: string;
@@ -15,6 +15,16 @@ interface WorkspaceItem {
   active: boolean;
 }
 
+interface HistorySearchResult {
+  messageId: number;
+  sessionId: string;
+  sessionTitle: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  score: number;
+}
+
 interface SidebarProps {
   sessions: Session[];
   activeSessionId: string | null;
@@ -27,6 +37,7 @@ interface SidebarProps {
   onDeleteSession: (id: string) => void;
   onRenameSession: (id: string, title: string) => void;
   onSwitchWorkspace: (id: string) => void;
+  onSelectSearchResult: (sessionId: string, messageId: number) => void;
 }
 
 function groupByDate(sessions: Session[]): { label: string; sessions: Session[] }[] {
@@ -75,11 +86,66 @@ export function Sidebar({
   onDeleteSession,
   onRenameSession,
   onSwitchWorkspace,
+  onSelectSearchResult,
 }: SidebarProps) {
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<HistorySearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Ctrl+K → focus search input
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Debounced search (300ms)
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/history/search?q=${encodeURIComponent(q)}&limit=30`);
+        const data = await res.json() as { results?: HistorySearchResult[] };
+        setSearchResults(data.results ?? []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Group search results by session for cleaner display
+  const groupedResults = useCallback(() => {
+    const map = new Map<string, { sessionTitle: string; sessionId: string; results: HistorySearchResult[] }>();
+    for (const r of searchResults) {
+      const existing = map.get(r.sessionId);
+      if (existing) {
+        existing.results.push(r);
+      } else {
+        map.set(r.sessionId, { sessionId: r.sessionId, sessionTitle: r.sessionTitle, results: [r] });
+      }
+    }
+    return Array.from(map.values());
+  }, [searchResults]);
 
   const handleRename = (sessionId: string, currentTitle: string) => {
     setRenamingId(sessionId);
@@ -140,7 +206,148 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar-sessions">
+      {/* Search bar */}
+      <div style={{ padding: "8px 12px 4px", position: "relative" }}>
+        <div style={{ position: "relative" }}>
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-tertiary)", pointerEvents: "none" }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search history… (Ctrl+K)"
+            style={{
+              width: "100%",
+              padding: "7px 28px 7px 32px",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-medium)",
+              borderRadius: 6,
+              color: "var(--text-primary)",
+              fontSize: 12,
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              aria-label="Clear search"
+              style={{
+                position: "absolute",
+                right: 6, top: "50%", transform: "translateY(-50%)",
+                width: 18, height: 18,
+                background: "transparent",
+                border: "none",
+                color: "var(--text-tertiary)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
+                fontSize: 14,
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Search results (replaces sessions list when active) */}
+      {searchQuery.trim().length >= 2 ? (
+        <div className="sidebar-sessions" style={{ overflowY: "auto" }}>
+          {searchLoading && (
+            <div style={{ padding: "20px 16px", fontSize: 11, color: "var(--text-tertiary)", textAlign: "center" }}>
+              Searching…
+            </div>
+          )}
+          {!searchLoading && searchResults.length === 0 && (
+            <div style={{ padding: "20px 16px", fontSize: 11, color: "var(--text-tertiary)", textAlign: "center" }}>
+              No matches found.
+            </div>
+          )}
+          {!searchLoading && searchResults.length > 0 && (
+            <>
+              <div style={{ padding: "6px 14px 4px", fontSize: 10, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {searchResults.length} result{searchResults.length === 1 ? "" : "s"}
+              </div>
+              {groupedResults().map((group) => (
+                <div key={group.sessionId} style={{ marginBottom: 6 }}>
+                  <div style={{
+                    padding: "4px 14px",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: "var(--text-secondary)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.3,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}>
+                    {group.sessionTitle}
+                  </div>
+                  {group.results.map((r) => (
+                    <button
+                      key={r.messageId}
+                      onClick={() => {
+                        onSelectSearchResult(r.sessionId, r.messageId);
+                        setSearchQuery("");
+                      }}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "6px 14px 8px 22px",
+                        background: "transparent",
+                        border: "none",
+                        borderLeft: "2px solid transparent",
+                        color: "var(--text-secondary)",
+                        cursor: "pointer",
+                        fontSize: 11,
+                        lineHeight: 1.4,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "var(--bg-elevated)";
+                        e.currentTarget.style.borderLeftColor = "var(--merck-teal)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "transparent";
+                        e.currentTarget.style.borderLeftColor = "transparent";
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 11 }}>{r.role === "user" ? "👤" : "🤖"}</span>
+                        <span style={{ fontSize: 9, color: "var(--text-tertiary)", fontWeight: 600 }}>
+                          {(r.score * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div style={{
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        color: "var(--text-secondary)",
+                      }}>
+                        {r.content.slice(0, 200)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="sidebar-sessions">
         {sessions.length === 0 && (
           <div className="sidebar-empty">
             No sessions yet. Click + to start.
@@ -200,7 +407,8 @@ export function Sidebar({
             ))}
           </div>
         ))}
-      </div>
+        </div>
+      )}
 
       <div className="sidebar-footer">
         <div

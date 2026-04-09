@@ -1,25 +1,35 @@
 /**
  * Session management — CRUD for chat sessions and messages.
  *
- * Includes compaction: when a session grows beyond COMPACT_THRESHOLD messages,
- * older messages are summarized into a ~200 token summary. The LLM receives:
- *   1. System prompt (PLAN.md + INDEX.md + RAG chunks)
- *   2. Session summary (compaction of older messages)
- *   3. Last SLIDING_WINDOW_SIZE exchanges (raw)
+ * Includes token-based compaction: when a session's total tokens exceed
+ * CHAT_COMPACTION_THRESHOLD_TOKENS, older messages are summarized into a
+ * structured summary (up to CHAT_COMPACTION_SUMMARY_TOKENS). The LLM receives:
+ *   1. System prompt (instructions.md + domain.md + PLAN.md headers + RAG chunks)
+ *   2. Session summary (structured compaction of older messages)
+ *   3. Sliding window of the last CHAT_COMPACTION_WINDOW_TOKENS of verbatim messages
  *   4. Current question
  */
 import { getDb } from "@tcc/core/src/common/db.js";
+import {
+  CHAT_COMPACTION_THRESHOLD_TOKENS,
+  CHAT_COMPACTION_WINDOW_TOKENS,
+} from "@tcc/core/src/config.js";
 
-// ── Config ──────────────────────────────────────────────────────────
+// ── Config (re-exported for legacy imports — values now come from env) ───
 
-/** Start compacting after this many messages (user + assistant combined). */
-export const COMPACT_THRESHOLD = 10;
+/** @deprecated Use CHAT_COMPACTION_THRESHOLD_TOKENS from config.ts instead. */
+export const COMPACT_THRESHOLD = CHAT_COMPACTION_THRESHOLD_TOKENS;
+/** @deprecated Use CHAT_COMPACTION_WINDOW_TOKENS from config.ts instead. */
+export const SLIDING_WINDOW_SIZE = CHAT_COMPACTION_WINDOW_TOKENS;
+/** @deprecated No longer used — compaction triggers on token threshold. */
+export const COMPACT_INTERVAL = 0;
 
-/** Keep this many recent exchanges (1 exchange = user + assistant). */
-export const SLIDING_WINDOW_SIZE = 5;
-
-/** Recompute summary every N new messages after threshold. */
-export const COMPACT_INTERVAL = 6;
+// ── Token estimation ────────────────────────────────────────────────
+// Fast heuristic: ~4 chars per token. Good enough for triggering compaction
+// since the LLM call will report exact usage after the fact.
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -192,10 +202,13 @@ export function saveCompactionSummary(sessionId: string, summary: string, atCoun
 /**
  * Build the session context to send to the LLM.
  *
- * Returns:
- *   - summary: the compaction summary (null if < COMPACT_THRESHOLD messages)
- *   - recentMessages: the last SLIDING_WINDOW_SIZE exchanges
- *   - needsCompaction: true if a new summary should be generated
+ * Token-based algorithm:
+ *   1. Compute total tokens across all messages
+ *   2. If total < CHAT_COMPACTION_THRESHOLD_TOKENS → no compaction, send everything
+ *   3. Otherwise, walk from the end keeping messages until sliding window is full
+ *      (CHAT_COMPACTION_WINDOW_TOKENS). Everything before that point is summarized.
+ *   4. If the set of "to-summarize" messages has grown since last compaction,
+ *      mark needsCompaction = true.
  */
 export function buildSessionContext(sessionId: string): SessionContext {
   ensureMigration();
@@ -203,8 +216,10 @@ export function buildSessionContext(sessionId: string): SessionContext {
   const totalMessages = allMessages.length;
   const session = getSession(sessionId);
 
-  // Under threshold → send all messages, no compaction needed
-  if (totalMessages <= COMPACT_THRESHOLD) {
+  const totalTokens = allMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+
+  // Under threshold → send everything verbatim, no compaction
+  if (totalTokens <= CHAT_COMPACTION_THRESHOLD_TOKENS) {
     return {
       summary: null,
       recentMessages: allMessages.map(({ role, content }) => ({ role, content })),
@@ -213,14 +228,25 @@ export function buildSessionContext(sessionId: string): SessionContext {
     };
   }
 
-  // Sliding window: keep last N exchanges (N*2 messages)
-  const windowSize = SLIDING_WINDOW_SIZE * 2;
-  const recentMessages = allMessages.slice(-windowSize).map(({ role, content }) => ({ role, content }));
+  // Walk backwards filling the sliding window
+  let slidingTokens = 0;
+  let cutIndex = allMessages.length; // inclusive start of sliding window
+  while (cutIndex > 0) {
+    const msgTokens = estimateTokens(allMessages[cutIndex - 1].content);
+    if (slidingTokens + msgTokens > CHAT_COMPACTION_WINDOW_TOKENS) break;
+    cutIndex--;
+    slidingTokens += msgTokens;
+  }
 
-  // Check if compaction is needed
-  const summaryAtCount = session?.summary_at_count ?? 0;
-  const messagesSinceSummary = totalMessages - summaryAtCount;
-  const needsCompaction = !session?.summary || messagesSinceSummary >= COMPACT_INTERVAL;
+  // Messages [0..cutIndex-1] are candidates for the summary
+  // Messages [cutIndex..end] are the verbatim sliding window
+  const toSummarizeCount = cutIndex;
+  const recentMessages = allMessages.slice(cutIndex).map(({ role, content }) => ({ role, content }));
+
+  // We need to (re)compact if the number of to-summarize messages has grown
+  // beyond what the current summary already covers.
+  const summaryCovers = session?.summary_at_count ?? 0;
+  const needsCompaction = !session?.summary || toSummarizeCount > summaryCovers;
 
   return {
     summary: session?.summary ?? null,
@@ -231,15 +257,43 @@ export function buildSessionContext(sessionId: string): SessionContext {
 }
 
 /**
- * Get all messages that need to be summarized (everything except the sliding window).
- * Used to generate the compaction summary.
+ * Get the messages to feed into the compaction prompt along with the
+ * existing summary (if any) so the LLM can produce a cumulative summary.
+ *
+ * Returns:
+ *   - existingSummary: the previous summary, or null
+ *   - newMessages: all messages that are NOT in the sliding window
+ *   - newCount: the value to store as summary_at_count after compaction
+ */
+export function getCompactionInput(sessionId: string): {
+  existingSummary: string | null;
+  newMessages: { role: "user" | "assistant"; content: string }[];
+  newCount: number;
+} {
+  const allMessages = getSessionMessages(sessionId);
+  const session = getSession(sessionId);
+
+  // Find sliding window cut point
+  let slidingTokens = 0;
+  let cutIndex = allMessages.length;
+  while (cutIndex > 0) {
+    const msgTokens = estimateTokens(allMessages[cutIndex - 1].content);
+    if (slidingTokens + msgTokens > CHAT_COMPACTION_WINDOW_TOKENS) break;
+    cutIndex--;
+    slidingTokens += msgTokens;
+  }
+
+  return {
+    existingSummary: session?.summary ?? null,
+    newMessages: allMessages.slice(0, cutIndex).map(({ role, content }) => ({ role, content })),
+    newCount: cutIndex,
+  };
+}
+
+/**
+ * @deprecated Use getCompactionInput instead — it returns both the existing
+ * summary and the messages to incorporate, for rolling compaction.
  */
 export function getMessagesToSummarize(sessionId: string): { role: "user" | "assistant"; content: string }[] {
-  const allMessages = getSessionMessages(sessionId);
-  const windowSize = SLIDING_WINDOW_SIZE * 2;
-
-  if (allMessages.length <= windowSize) return [];
-
-  // Everything before the sliding window
-  return allMessages.slice(0, -windowSize).map(({ role, content }) => ({ role, content }));
+  return getCompactionInput(sessionId).newMessages;
 }

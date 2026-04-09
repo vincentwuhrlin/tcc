@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev:server": "tsx --watch server/index.ts",
+    "dev:server": "tsx watch --ignore \"../../workspaces/**\" --ignore \"**/workspace.db*\" --ignore \"**/*.db-journal\" --ignore \"**/*.db-wal\" --ignore \"**/*.db-shm\" --ignore \"**/.cache/**\" --ignore \"**/.huggingface/**\" --ignore \"**/transformers-cache/**\" server/index.ts",
     "dev:client": "vite",
     "build": "vite build",
     "preview": "vite preview"

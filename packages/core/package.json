@@ -8,7 +8,6 @@
     "transcript": "tsx src/cli.ts transcript",
     "transcript:documents": "tsx src/cli.ts documents",
     "transcript:videos": "tsx src/cli.ts videos",
-
     "gpu:create": "tsx src/cli.ts create",
     "gpu:status": "tsx src/cli.ts status",
     "gpu:ssh": "tsx src/cli.ts ssh",
@@ -16,8 +15,6 @@
     "gpu:stop": "tsx src/cli.ts stop",
     "gpu:terminate": "tsx src/cli.ts terminate",
     "media:stats": "tsx src/cli.ts stats",
-    "media:frontmatter:strip": "tsx src/cli.ts frontmatter:strip",
-    "media:frontmatter:strip:dry": "tsx src/cli.ts frontmatter:strip --dry-run",
     "media:discover": "tsx src/cli.ts discover",
     "media:discover:force": "tsx src/cli.ts discover --force",
     "media:synthesize": "tsx src/cli.ts synthesize",
@@ -39,10 +36,13 @@
     "media:embed:bench:dry": "tsx src/cli.ts embed:bench --dry-run",
     "media:embed:bench:generate": "tsx src/cli.ts embed:bench --generate",
     "media:embed:stats": "tsx src/cli.ts embed:stats",
-
-    "bundle": "tsx src/cli.ts export",
-    "bundle:dry": "tsx src/cli.ts export --dry-run",
-
+    "workspace:clean": "tsx src/cli.ts workspace:clean",
+    "workspace:clean:dry": "tsx src/cli.ts workspace:clean --dry-run",
+    "workspace:clean:with-qa": "tsx src/cli.ts workspace:clean --with-qa",
+    "workspace:clean:force": "tsx src/cli.ts workspace:clean --force",
+    "workspace:zip": "tsx src/cli.ts workspace:zip",
+    "workspace:zip:full": "tsx src/cli.ts workspace:zip --full",
+    "workspace:zip:dry": "tsx src/cli.ts workspace:zip --dry-run",
     "chat": "tsx src/cli.ts chat",
     "uptimize:stats": "tsx src/cli.ts uptimize:stats"
   },
@@ -51,11 +51,13 @@
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
     "@huggingface/transformers": "^3.4.0",
+    "archiver": "^7.0.1",
     "better-sqlite3": "^11.0.0",
     "exceljs": "^4.4.0",
     "franc-min": "^6.2.0"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.3",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0"
   }

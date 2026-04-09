@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, useEffect, useCallback, type FormEvent, type KeyboardEvent, type Dispatch, type SetStateAction } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Workspace, ChatMessage, DebugPayload } from "../App";
@@ -23,6 +23,8 @@ interface ChatProps {
   activeSessionId: string | null;
   ensureSession: () => Promise<string>;
   onMessageSent: () => void;
+  scrollToMessageId?: number | null;
+  onScrolledToMessage?: () => void;
 }
 
 /* ── Markdown renderer using react-markdown + GFM ─────────────────── */
@@ -296,52 +298,153 @@ function QaTagModal({ target, sessionId, onClose, onSaved }: {
   );
 }
 
-export function Chat({ workspace, messages, setMessages, activeSessionId, ensureSession, onMessageSent }: ChatProps) {
+/* ── Focus pills — category deep-dive buttons ───────────────────────── */
+function FocusPills({ categories, onFocus, disabled }: {
+  categories: { code: string; name: string; chunkCount: number }[];
+  onFocus: (cat: { code: string; name: string }) => void;
+  disabled: boolean;
+}) {
+  if (!categories?.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "10px 0 4px", alignItems: "center" }}>
+      <span style={{ fontSize: 11, color: "var(--text-tertiary)", fontWeight: 600, marginRight: 4 }}>🔍 Focus</span>
+      {categories.map((cat) => (
+        <button
+          key={cat.code}
+          onClick={() => onFocus(cat)}
+          disabled={disabled}
+          title={`Load all ${cat.chunkCount} chunks from category ${cat.code}`}
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1.5px solid var(--border-medium)",
+            borderRadius: 16,
+            padding: "4px 10px 4px 12px",
+            fontSize: 11,
+            cursor: disabled ? "not-allowed" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            transition: "all 0.15s",
+            fontFamily: "inherit",
+            color: "var(--text-primary)",
+            opacity: disabled ? 0.4 : 1,
+          }}
+          onMouseEnter={(e) => {
+            if (disabled) return;
+            e.currentTarget.style.borderColor = "var(--merck-teal-light)";
+            e.currentTarget.style.background = "var(--merck-teal-glow)";
+            e.currentTarget.style.color = "var(--merck-teal-light)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--border-medium)";
+            e.currentTarget.style.background = "var(--bg-elevated)";
+            e.currentTarget.style.color = "var(--text-primary)";
+          }}
+        >
+          <span>{cat.code}. {cat.name}</span>
+          <span style={{
+            background: "var(--merck-teal)",
+            color: "#fff",
+            borderRadius: 10,
+            padding: "1px 7px",
+            fontSize: 9,
+            fontWeight: 700,
+            minWidth: 18,
+            textAlign: "center",
+          }}>
+            {cat.chunkCount}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Chat({ workspace, messages, setMessages, activeSessionId, ensureSession, onMessageSent, scrollToMessageId, onScrolledToMessage }: ChatProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [lastCompaction, setLastCompaction] = useState<{ totalMessages: number } | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [qaTarget, setQaTarget] = useState<QaTagTarget | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [memoriesEnabled, setMemoriesEnabled] = useState(true);
+  const [extracting, setExtracting] = useState(false);
+  const [showExtractConfirm, setShowExtractConfirm] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<"search" | "compact" | "generate">("search");
+  const [willCompact, setWillCompact] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Only auto-scroll if user hasn't scrolled up during streaming
+  // Scroll helpers
+  const distanceFromBottom = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return 0;
+    return el.scrollHeight - el.scrollTop - el.clientHeight;
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+    userScrolledUpRef.current = false;
+    setShowScrollButton(false);
+  };
+
+  // Auto-scroll on new messages only if user is near the bottom
   useEffect(() => {
     if (!userScrolledUpRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages]);
 
-  // Detect user intentionally scrolling up (wheel or touch)
+  // Scroll tracking — always active (not just during loading)
   useEffect(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
 
+    // Very strict threshold — only release auto-scroll when user is AT the bottom.
+    // Any upward wheel/touch sets the lock IMMEDIATELY and the button appears,
+    // regardless of distance. This prevents "small scroll up → auto-scroll resumes".
+    const RESUME_THRESHOLD = 2;
+
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0 && isLoading) {
-        // Scrolling up while streaming → lock
+      if (e.deltaY < 0) {
         userScrolledUpRef.current = true;
-      }
-    };
-    const onScroll = () => {
-      if (!isLoading) return;
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-      if (atBottom) {
-        // User scrolled back to bottom → unlock
-        userScrolledUpRef.current = false;
+        setShowScrollButton(true);
       }
     };
 
+    const onTouchMove = () => {
+      // Any manual touch = user intent to scroll
+      userScrolledUpRef.current = true;
+      setShowScrollButton(true);
+    };
+
+    const onScroll = () => {
+      const dist = distanceFromBottom();
+      if (dist < RESUME_THRESHOLD) {
+        // User is AT the bottom — release lock and hide button
+        userScrolledUpRef.current = false;
+        setShowScrollButton(false);
+      } else if (userScrolledUpRef.current) {
+        // User has scrolled up — keep the button visible
+        setShowScrollButton(true);
+      }
+      // If dist > threshold but ref is false, it's an in-flight auto-scroll
+      // animation — don't show the button.
+    };
+
     el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
     el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
     return () => {
       el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("scroll", onScroll);
     };
-  }, [isLoading]);
+  }, [messages.length]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -366,12 +469,105 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // Fetch app settings on mount (memoriesEnabled flag)
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data: { memoriesEnabled?: boolean }) => {
+        if (typeof data.memoriesEnabled === "boolean") {
+          setMemoriesEnabled(data.memoriesEnabled);
+        }
+      })
+      .catch(() => {});
+    // Re-fetch when the window regains focus (in case user toggled in Settings)
+    const onFocus = () => {
+      fetch("/api/settings")
+        .then((r) => r.json())
+        .then((data: { memoriesEnabled?: boolean }) => {
+          if (typeof data.memoriesEnabled === "boolean") {
+            setMemoriesEnabled(data.memoriesEnabled);
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  // Open the confirmation modal (called by the footer button)
+  const handleExtractMemories = useCallback(() => {
+    if (!activeSessionId) {
+      setToast({ message: "No active session — send a message first", type: "error" });
+      return;
+    }
+    setShowExtractConfirm(true);
+  }, [activeSessionId]);
+
+  // Actually perform the extraction (called by the modal's "Extract" button)
+  const confirmAndExtract = useCallback(async () => {
+    if (!activeSessionId) return;
+    setShowExtractConfirm(false);
+    setExtracting(true);
+    try {
+      const res = await fetch(`/api/memories/extract/${activeSessionId}`, { method: "POST" });
+      const data = (await res.json()) as { extracted?: number; error?: string };
+      if (data.error) {
+        setToast({ message: `Extraction failed: ${data.error}`, type: "error" });
+      } else {
+        const n = data.extracted ?? 0;
+        setToast({
+          message: n === 0
+            ? "No new durable facts found in this session"
+            : `🧠 Extracted ${n} new memor${n === 1 ? "y" : "ies"}`,
+          type: "success",
+        });
+      }
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : "Unknown error", type: "error" });
+    } finally {
+      setExtracting(false);
+    }
+  }, [activeSessionId]);
+
   // Auto-clear toast after 4s
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // ESC closes the extract confirmation dialog
+  useEffect(() => {
+    if (!showExtractConfirm) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setShowExtractConfirm(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showExtractConfirm]);
+
+  // Scroll to a specific message when navigating from history search
+  useEffect(() => {
+    if (scrollToMessageId == null) return;
+    // Check if the target message is actually in the current messages array.
+    // If not, messages are still loading — wait for next render.
+    const target = messages.find((m) => m.id === scrollToMessageId);
+    if (!target) return;
+
+    // Give the DOM a moment to render the message, then scroll + highlight
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`msg-${scrollToMessageId}`);
+      if (el) {
+        userScrolledUpRef.current = true; // prevent autoscroll override
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("msg-highlight");
+        setTimeout(() => el.classList.remove("msg-highlight"), 2500);
+      }
+      onScrolledToMessage?.();
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [scrollToMessageId, messages, onScrolledToMessage]);
 
   // Find the user question preceding a given assistant message index
   const handleTag = (assistantMsgId: string | number) => {
@@ -395,6 +591,8 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
 
     setInput("");
     setIsLoading(true);
+    setLoadingPhase("search");
+    setWillCompact(false);
     userScrolledUpRef.current = false; // snap back to bottom on new message
 
     // Reset textarea height
@@ -461,13 +659,23 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
               if (event.type === "meta") {
                 streamedSources = event.sources as Source[] | undefined;
                 streamedContext = event.context as typeof streamedContext;
+                const focusCats = event.focusCategories as { code: string; name: string; chunkCount: number }[] | undefined;
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantId
-                      ? { ...m, sources: streamedSources, context: streamedContext }
+                      ? { ...m, sources: streamedSources, context: streamedContext, focusCategories: focusCats }
                       : m,
                   ),
                 );
+                // RAG is done — if no compaction is coming, we move straight to "generate".
+                // Otherwise, the "compacting" event will switch us to "compact".
+                const wc = (event.context as { willCompact?: boolean } | undefined)?.willCompact ?? false;
+                setWillCompact(wc);
+                if (!wc) setLoadingPhase("generate");
+              } else if (event.type === "compacting") {
+                setLoadingPhase("compact");
+              } else if (event.type === "compacted") {
+                setLoadingPhase("generate");
               } else if (event.type === "debug") {
                 const debugData = event as unknown as { type: string } & DebugPayload;
                 const { type: _, ...payload } = debugData;
@@ -538,6 +746,106 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
     send();
   };
 
+  // ── Focus: deep-dive into a category ──────────────────────────────
+  const handleFocus = async (category: { code: string; name: string }, originalMessage: string) => {
+    if (isLoading) return;
+    setIsLoading(true);
+    setLoadingPhase("search");
+    setWillCompact(false);
+    userScrolledUpRef.current = false;
+
+    try {
+      const sessionId = await ensureSession();
+
+      // Add a user message indicating the focus action
+      const focusUserMsg: ChatMessage = {
+        id: "focus-user-" + Date.now(),
+        role: "user",
+        content: `🔍 **Focus: ${category.code}. ${category.name}**  \nRe-analyzing with all documents from this category…`,
+      };
+      setMessages((prev) => [...prev, focusUserMsg]);
+
+      // Create assistant placeholder
+      const assistantId = "focus-resp-" + Date.now();
+      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+
+      const res = await fetch("/api/chat/focus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, message: originalMessage, category: category.code }),
+      });
+
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let streamedSources: Source[] | undefined;
+      let streamedTiming: Timing | undefined;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop()!;
+
+        for (const part of parts) {
+          for (const line of part.split("\n")) {
+            if (!line.startsWith("data: ") && !line.startsWith("data:")) continue;
+            const jsonStr = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
+            if (!jsonStr.trim()) continue;
+
+            try {
+              const event = JSON.parse(jsonStr) as Record<string, unknown>;
+
+              if (event.type === "meta") {
+                streamedSources = event.sources as Source[] | undefined;
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, sources: streamedSources } : m),
+                );
+                // Focus never compacts → advance directly to generate
+                setLoadingPhase("generate");
+              } else if (event.type === "debug") {
+                const debugData = event as unknown as { type: string } & DebugPayload;
+                const { type: _, ...payload } = debugData;
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, debug: payload as DebugPayload } : m),
+                );
+              } else if (event.type === "delta") {
+                const chunk = event.text as string;
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, content: m.content + chunk } : m),
+                );
+              } else if (event.type === "done") {
+                streamedTiming = event.timing as Timing | undefined;
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, timing: streamedTiming } : m),
+                );
+              } else if (event.type === "error") {
+                const errMsg = event.message as string;
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, content: `**Error** — ${errMsg}` } : m),
+                );
+              }
+            } catch { /* Ignore malformed JSON */ }
+          }
+        }
+      }
+
+      onMessageSent();
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        id: "err-" + Date.now(),
+        role: "assistant",
+        content: `**Error** — ${err instanceof Error ? err.message : "Focus failed"}`,
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -552,38 +860,44 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
 
   const stats = workspace?.stats;
 
-  // ── Loading indicator with stages ──────────────────────────────────
-  function LoadingIndicator({ messageCount }: { messageCount: number }) {
-    const [phase, setPhase] = useState(0);
-    const isLongSession = messageCount > 10;
+  // ── Loading indicator with stages (driven by SSE events) ──────────
+  function LoadingIndicator({
+    phase,
+    willCompact,
+  }: {
+    phase: "search" | "compact" | "generate";
+    willCompact: boolean;
+  }) {
+    // Show 3 phases only if compaction is going to happen, otherwise just 2.
+    const phases: { key: "search" | "compact" | "generate"; label: string }[] = willCompact
+      ? [
+          { key: "search", label: "Searching knowledge base" },
+          { key: "compact", label: "Compacting session history" },
+          { key: "generate", label: "Generating response" },
+        ]
+      : [
+          { key: "search", label: "Searching knowledge base" },
+          { key: "generate", label: "Generating response" },
+        ];
 
-    const phases = isLongSession
-      ? ["Searching knowledge base", "Compacting session history", "Generating response"]
-      : ["Searching knowledge base", "Generating response"];
-
-    useEffect(() => {
-      const timers: NodeJS.Timeout[] = [];
-      for (let i = 1; i < phases.length; i++) {
-        timers.push(setTimeout(() => setPhase(i), i * 1500));
-      }
-      return () => timers.forEach(clearTimeout);
-    }, [phases.length]);
+    const currentIdx = phases.findIndex((p) => p.key === phase);
+    const safeIdx = currentIdx === -1 ? 0 : currentIdx;
 
     return (
       <div className="loading-indicator">
         <div className="loading-progress">
           <div
             className="loading-bar"
-            style={{ width: `${((phase + 1) / phases.length) * 100}%` }}
+            style={{ width: `${((safeIdx + 1) / phases.length) * 100}%` }}
           />
         </div>
         <div className="loading-phases">
-          {phases.map((label, i) => (
+          {phases.map((p, i) => (
             <span
-              key={label}
-              className={`loading-phase ${i < phase ? "loading-phase-done" : ""} ${i === phase ? "loading-phase-active" : ""}`}
+              key={p.key}
+              className={`loading-phase ${i < safeIdx ? "loading-phase-done" : ""} ${i === safeIdx ? "loading-phase-active" : ""}`}
             >
-              {i < phase ? "✓" : i === phase ? "›" : "·"} {label}
+              {i < safeIdx ? "✓" : i === safeIdx ? "›" : "·"} {p.label}
             </span>
           ))}
         </div>
@@ -749,13 +1063,13 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
 
   // ── Chat view ─────────────────────────────────────────────────────
   return (
-    <div className="chat-container">
+    <div className="chat-container" style={{ position: "relative" }}>
       <div className="messages" ref={messagesContainerRef}>
         {messages.map((msg) => (
-          <div key={msg.id} className={`message message-${msg.role}`}>
+          <div key={msg.id} id={`msg-${msg.id}`} className={`message message-${msg.role}`}>
             {msg.role === "assistant" && msg.content === "" && isLoading ? (
               <div className="message-body">
-                <LoadingIndicator messageCount={messages.length} />
+                <LoadingIndicator phase={loadingPhase} willCompact={willCompact} />
               </div>
             ) : msg.role === "assistant" ? (
               <>
@@ -765,6 +1079,24 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
                   </div>
                   {msg.content !== "" && (
                     <SourcesBlock sources={msg.sources} timing={msg.timing} context={msg.context} />
+                  )}
+                  {msg.content !== "" && msg.focusCategories && msg.focusCategories.length > 0 && (
+                    <FocusPills
+                      categories={msg.focusCategories}
+                      onFocus={(cat) => {
+                        // Find the user question that preceded this assistant message
+                        const msgIdx = messages.indexOf(msg);
+                        let question = "";
+                        for (let i = msgIdx - 1; i >= 0; i--) {
+                          if (messages[i].role === "user") {
+                            question = messages[i].content;
+                            break;
+                          }
+                        }
+                        if (question) handleFocus(cat, question);
+                      }}
+                      disabled={isLoading}
+                    />
                   )}
                 </div>
                 {msg.content !== "" && (
@@ -795,6 +1127,46 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Scroll-to-bottom button — appears when user has scrolled up */}
+      {showScrollButton && (
+        <button
+          onClick={() => scrollToBottom("smooth")}
+          aria-label="Scroll to bottom"
+          style={{
+            position: "absolute",
+            bottom: 110,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 36,
+            height: 36,
+            borderRadius: "50%",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-medium)",
+            color: "var(--text-primary)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+            zIndex: 10,
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "var(--merck-teal-light)";
+            e.currentTarget.style.color = "var(--merck-teal-light)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--border-medium)";
+            e.currentTarget.style.color = "var(--text-primary)";
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <polyline points="19 12 12 19 5 12" />
+          </svg>
+        </button>
+      )}
+
       <form className="input-area" onSubmit={handleSubmit}>
         <div className="input-wrapper">
           <textarea
@@ -817,6 +1189,25 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
           <span>Release 6 — Markdown + Q&A tagging + debug stats</span>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span>Shift+Enter for line break</span>
+            {memoriesEnabled && (
+              <button
+                type="button"
+                onClick={handleExtractMemories}
+                disabled={extracting || !activeSessionId}
+                title={activeSessionId ? "Extract durable facts from this session" : "Send a message first"}
+                style={{
+                  background: "transparent",
+                  color: "inherit",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4, padding: "2px 8px",
+                  cursor: extracting || !activeSessionId ? "not-allowed" : "pointer",
+                  fontSize: 11, fontWeight: 600,
+                  opacity: extracting || !activeSessionId ? 0.35 : 0.5,
+                }}
+              >
+                {extracting ? "🧠 Extracting…" : "🧠 Memories"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setDebugOpen(!debugOpen)}
@@ -855,6 +1246,120 @@ export function Chat({ workspace, messages, setMessages, activeSessionId, ensure
         <div className={`qa-toast qa-toast-${toast.type}`}>
           <span>{toast.type === "success" ? "🏷️" : "❌"}</span>
           <span>{toast.message}</span>
+        </div>
+      )}
+
+      {/* Extract memories confirmation dialog */}
+      {showExtractConfirm && (
+        <div
+          onClick={() => setShowExtractConfirm(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0, 0, 0, 0.6)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-medium)",
+              borderRadius: 12,
+              width: "100%",
+              maxWidth: 460,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{
+              padding: "18px 22px 14px",
+              borderBottom: "1px solid var(--border-medium)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}>
+              <span style={{ fontSize: 22 }}>🧠</span>
+              <h2 style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: "var(--text-primary)",
+                margin: 0,
+              }}>
+                Extract memories from this session?
+              </h2>
+            </div>
+
+            <div style={{ padding: "18px 22px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+              <p style={{ margin: "0 0 12px" }}>
+                Claude will analyze this conversation ({messages.length} message{messages.length === 1 ? "" : "s"}) to extract durable facts about you — things like your role, ongoing projects, technical preferences, or collaborators.
+              </p>
+              <p style={{ margin: "0 0 12px" }}>
+                Each extracted fact becomes a memory that will be automatically injected into every future chat in this workspace, so Claude remembers your context across sessions.
+              </p>
+              <div style={{
+                padding: "10px 12px",
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-medium)",
+                borderRadius: 6,
+                fontSize: 11,
+                color: "var(--text-tertiary)",
+                marginTop: 14,
+              }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <span>ℹ️</span>
+                  <span>
+                    This makes one LLM call (tracked as <code style={{ fontSize: 10, background: "var(--bg-tertiary)", padding: "1px 4px", borderRadius: 3 }}>memory_extract</code> in Token usage). Temporary or session-specific details are skipped. You can review, toggle, or delete memories later in Settings.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{
+              padding: "12px 22px 16px",
+              display: "flex",
+              gap: 10,
+              justifyContent: "flex-end",
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowExtractConfirm(false)}
+                style={{
+                  padding: "8px 16px",
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border-medium)",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmAndExtract}
+                style={{
+                  padding: "8px 16px",
+                  background: "var(--merck-teal)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Extract memories
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

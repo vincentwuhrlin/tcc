@@ -306,8 +306,9 @@ Output: [{ "chunk_id": "<id>", "queries": ["q1", "q2", "q3"] }, ...]`;
     id: c.id, source: c.source, content: truncateContent(c.content),
   }));
 
-  const response = await llmCall(systemPrompt,
-    `Generate ${QUERIES_PER_CHUNK} search queries for each of these ${chunks.length} chunks:\n\n${JSON.stringify(payload, null, 2)}`, 2048);
+  const { text: response } = await llmCall(systemPrompt,
+    `Generate ${QUERIES_PER_CHUNK} search queries for each of these ${chunks.length} chunks:\n\n${JSON.stringify(payload, null, 2)}`, 2048,
+    undefined, { sessionId: null, kind: "embed_bench" });
 
   const parsed = JSON.parse(extractJson(response)) as
     { chunk_id: string; queries: string[] }[];
@@ -419,8 +420,9 @@ Same language as content. Return ONLY valid JSON:
     id: c.id, source: c.source, content: truncateContent(c.content),
   }));
 
-  const response = await llmCall(systemPrompt,
-    `Generate ${count} discriminating queries:\n\n${JSON.stringify(payload, null, 2)}`, 1024);
+  const { text: response } = await llmCall(systemPrompt,
+    `Generate ${count} discriminating queries:\n\n${JSON.stringify(payload, null, 2)}`, 1024,
+    undefined, { sessionId: null, kind: "embed_bench" });
 
   const parsed = JSON.parse(extractJson(response)) as
     { target_id: string; queries: string[] };

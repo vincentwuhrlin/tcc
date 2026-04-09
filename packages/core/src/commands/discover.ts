@@ -616,7 +616,7 @@ export async function discover(): Promise<void> {
         }
 
         const userMessage = fillUserMessage(userTemplate, section.content);
-        const response = await llmCall(system, userMessage, MEDIA_DISCOVER_MAX_TOKENS);
+        const { text: response } = await llmCall(system, userMessage, MEDIA_DISCOVER_MAX_TOKENS, undefined, { sessionId: null, kind: "discover" });
         const parsed = parseJsonResponse(response) as DiscoverResult | null;
         llmCalls++;
 

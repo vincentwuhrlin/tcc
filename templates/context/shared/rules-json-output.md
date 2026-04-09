@@ -1,5 +1,13 @@
-- tags: 3-8 lowercase specific keywords (not generic terms)
-- quality: "high" = dense technical info, specific requirements/configs; "medium" = useful overview; "low" = marketing fluff or very superficial
-- key_facts: 2-5 concrete facts, numbers, or specific technical details from the document
-- summary: focus on WHAT you can learn from this document, not what it "discusses"
+- building_blocks: pick from [noa_concept, security_gateway, information_model, vor, aggregating_server, data_diode, mtp_integration]. Multiple allowed. Use "noa_concept" for general NOA architecture. Use "data_diode" for hardware/software diode products even if not explicitly about NE 177.
+- ne_references: pick from [NE175, NE176, NE177, NE178, NE179, NE183, NE184, NE198]. Multiple allowed. Empty array if no specific NE is referenced.
+- standards: pick from [IEC62443, IEC62443-2-1, IEC62443-2-4, IEC62443-3-2, IEC62443-3-3, IEC62443-4-1, IEC62443-4-2, IEC62541_OPCUA, PADIM, NIST800-82, ISO27001, NIS2, NA169]. Multiple allowed. Empty array if none.
+- vendors: pick from [phoenix_contact, softing, siemens, endress_hauser, beckhoff, kaspersky, waterfall, opswat, genua, advenica, hirschmann, owl, turck, yokogawa, emerson, abb, honeywell, hivemq, n3uron, copa_data, fox_it, infodas]. Multiple allowed. Empty array if no vendor prominently featured.
+- topics: 2-5 high-level topic areas (e.g. "unidirectional security gateway", "HART field extraction", "OPC UA PubSub transport", "brownfield deployment", "MTP diagnostics")
+- tags: 5-8 lowercase specific keywords — be precise, not generic. Good: "ne-177-basic-extended", "data-diode-galvanic-separation", "opc-ua-pubsub-mqtt", "vor-six-steps". Bad: "namur", "noa", "security", "architecture".
+- quality: "high" = dense technical info with specific architectures, configurations, IEC 62443 mappings, implementation details; "medium" = useful overview or introduction; "low" = marketing fluff, boilerplate, superficial
+- key_facts: 2-5 concrete facts, numbers, product certifications (EAL levels, SL levels), protocol details, or specific technical specifications found in the content
+- noa_step: which step(s) of the NOA data flow does this doc address? [1] = Extract — getting data from field level (HART, PROFIBUS, OPC UA read, add-on sensors, contactless extraction); [2] = Transport — moving data via edge gateway, protocol conversion, NOA diode, pub/sub (MQTT, AMQP, OPC UA PubSub, Kafka); [3] = Consume — structuring data in broker/UNS, M+O applications, dashboards, analytics, digital twins. Can include multiple steps.
+- noa_segment: which architectural segment(s)? [1] = Field (instruments, sensors, PLCs, DCS); [2] = Edge Gateway (protocol conversion, containerized apps, NOA diode); [3] = Broker (MQTT broker, UNS, topic hierarchy); [4] = Cloud/On-prem (M+O applications, dashboards, analytics). Can include multiple.
+- suggested_category: imagine you are building a knowledge base for mastering NOA — where would this doc go? Use categories from the existing plan: "NOA Concept & Architecture", "IEC 62443 Framework", "Security Gateway & NOA Diode", "Data Diode Products", "Verification of Request", "Information Model & PA-DIM", "MTP & Modular Automation", "IT/OT Infrastructure & Protocols"
+- summary: focus on WHAT you can learn from this document, not what it "discusses" or "covers". Be specific: mention concrete architectures, products, IEC 62443 mappings, implementation patterns.
 - Return ONLY valid JSON. No markdown fences, no preamble.

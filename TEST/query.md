@@ -1,1 +1,0 @@
-Tu peux me faire une synthèse sur les vendors, vis à vis de la sécurity gateway / NOA Diode ?

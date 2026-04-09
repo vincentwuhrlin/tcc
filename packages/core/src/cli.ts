@@ -20,7 +20,6 @@ import { split, splitCheck, splitUndo } from "./commands/split.js";
 import { discover } from "./commands/discover.js";
 import { synthesize } from "./commands/synthesize.js";
 import { classify, classifyCheck } from "./commands/classify.js";
-import { frontmatterStrip } from "./commands/frontmatter-strip.js";
 import { embed } from "./commands/embed.js";
 import { embedGpu } from "./commands/embed-gpu.js";
 import { embedImport } from "./commands/embed-import.js";
@@ -35,6 +34,10 @@ import { chat } from "./commands/chat.js";
 
 // ── Utilities ───────────────────────────────────────────────────────
 import { uptimizeStats } from "./commands/uptimize-stats.js";
+
+// ── Workspace management ────────────────────────────────────────────
+import { workspaceClean } from "./commands/workspace-clean.js";
+import { workspaceZip } from "./commands/workspace-zip.js";
 
 // ── Command registry ────────────────────────────────────────────────
 const commands: Record<string, () => Promise<void>> = {
@@ -61,7 +64,6 @@ const commands: Record<string, () => Promise<void>> = {
   synthesize,
   classify,
   "classify:check": classifyCheck,
-  "frontmatter:strip": frontmatterStrip,
   embed,
   "embed:gpu": embedGpu,
   "embed:import": embedImport,
@@ -76,6 +78,10 @@ const commands: Record<string, () => Promise<void>> = {
 
   // utilities
   "uptimize:stats": uptimizeStats,
+
+  // workspace management
+  "workspace:clean": workspaceClean,
+  "workspace:zip": workspaceZip,
 };
 
 const cmd = process.argv[2];
@@ -110,8 +116,6 @@ if (!cmd || !commands[cmd]) {
   console.log("    npm run media:synthesize        2. Synthesize → SUMMARY.md + PLAN.md");
   console.log("    npm run media:classify          3. Classify → frontmatter + INDEX.md");
   console.log("    npm run media:classify:check    Audit classification coverage");
-  console.log("    npm run media:frontmatter:strip        Strip all frontmatter from .md files");
-  console.log("    npm run media:frontmatter:strip:dry    Preview frontmatter removal");
   console.log();
   console.log("  RAG (embedding + vector search):");
   console.log("    npm run media:embed             4. Embed chunks → workspace.db");
@@ -133,6 +137,14 @@ if (!cmd || !commands[cmd]) {
   console.log();
   console.log("  Utilities:");
   console.log("    npm run uptimize:stats         Check UPTIMIZE API spend and status");
+  console.log();
+  console.log("  Workspace management (require --workspace=<n>):");
+  console.log("    npm run workspace:clean -- --workspace=<n>         Strip dynamic data before sharing");
+  console.log("    npm run workspace:clean:dry -- --workspace=<n>     Preview what would be deleted");
+  console.log("    npm run workspace:clean:with-qa -- --workspace=<n> Also wipe QA files + embeddings");
+  console.log("    npm run workspace:zip -- --workspace=<n>           Zip workspace for sharing (slim)");
+  console.log("    npm run workspace:zip:full -- --workspace=<n>      Zip including raw media");
+  console.log("    npm run workspace:zip:dry -- --workspace=<n>       Preview files without writing");
   console.log();
   console.log("  All commands accept --workspace=<path> to override WORKSPACE from .env");
   console.log();

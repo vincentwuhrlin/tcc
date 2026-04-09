@@ -361,7 +361,7 @@ export async function classify(): Promise<void> {
     process.stdout.write(`   [${i + 1}/${toClassify.length}] ${f.name.slice(0, 50)}...`);
 
     try {
-      const response = await llmCall(sourcePrompt.system, userMessage, MEDIA_CLASSIFY_MAX_TOKENS);
+      const { text: response } = await llmCall(sourcePrompt.system, userMessage, MEDIA_CLASSIFY_MAX_TOKENS, undefined, { sessionId: null, kind: "classify" });
       const result = parseJsonResponse(response);
 
       if (result && Array.isArray(result.categories)) {
@@ -431,7 +431,7 @@ export async function classify(): Promise<void> {
     }
 
     try {
-      const response = await llmCall(chunkPrompt.system, userMessage, MEDIA_CLASSIFY_MAX_TOKENS);
+      const { text: response } = await llmCall(chunkPrompt.system, userMessage, MEDIA_CLASSIFY_MAX_TOKENS, undefined, { sessionId: null, kind: "classify" });
       const result = parseJsonResponse(response);
 
       if (result && Array.isArray(result.chunk_categories)) {

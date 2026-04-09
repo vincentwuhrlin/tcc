@@ -463,7 +463,7 @@ interface VideoSegment {
 }
 
 async function segmentVideo(content: string): Promise<VideoSegment[]> {
-  const response = await llmCall(VIDEO_SEGMENT_PROMPT, content, 4096);
+  const { text: response } = await llmCall(VIDEO_SEGMENT_PROMPT, content, 4096, undefined, { sessionId: null, kind: "split" });
   const cleaned = response.replace(/```json|```/g, "").trim();
 
   try {

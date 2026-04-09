@@ -214,7 +214,7 @@ export async function chat(): Promise<void> {
 
       try {
         const t0 = Date.now();
-        const response = await llmCall(systemPrompt, trimmed, 4096, getChatLlmConfig());
+        const { text: response } = await llmCall(systemPrompt, trimmed, 4096, getChatLlmConfig(), { sessionId: null, kind: "chat_cli" });
         const llmMs = Date.now() - t0;
 
         console.log(response);

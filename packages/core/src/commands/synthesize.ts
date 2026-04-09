@@ -199,7 +199,7 @@ export async function synthesize(): Promise<void> {
   const timer1 = startProgress();
   let planResponse: string;
   try {
-    planResponse = await llmCall(planPrompt.system, planUser, MEDIA_SYNTHESIZE_MAX_TOKENS);
+    planResponse = (await llmCall(planPrompt.system, planUser, MEDIA_SYNTHESIZE_MAX_TOKENS, undefined, { sessionId: null, kind: "synthesize" })).text;
   } catch (err) {
     stopProgress(timer1);
     const msg = err instanceof Error ? err.message : String(err);
@@ -220,7 +220,7 @@ export async function synthesize(): Promise<void> {
   const timer2 = startProgress();
   let summaryResponse: string;
   try {
-    summaryResponse = await llmCall(summaryPrompt.system, summaryUser, MEDIA_SYNTHESIZE_MAX_TOKENS);
+    summaryResponse = (await llmCall(summaryPrompt.system, summaryUser, MEDIA_SYNTHESIZE_MAX_TOKENS, undefined, { sessionId: null, kind: "synthesize" })).text;
   } catch (err) {
     stopProgress(timer2);
     const msg = err instanceof Error ? err.message : String(err);

@@ -51,6 +51,8 @@ function requireEnv(key: string, hint?: string): string {
 // Full path      = WORKSPACES_DIR/WORKSPACE
 // CLI flag --workspace= overrides WORKSPACE name
 const workspaceFlag = process.argv.find((a) => a.startsWith("--workspace="))?.split("=")[1];
+/** True if --workspace=<name> was passed on the command line (not fallback to env/default). */
+export const WORKSPACE_FLAG_EXPLICIT = workspaceFlag !== undefined;
 export const WORKSPACES_DIR = resolvePath(process.env.WORKSPACES_DIR ?? "workspaces");
 export const WORKSPACE_NAME = workspaceFlag ?? process.env.WORKSPACE ?? "default";
 export const WORKSPACE = resolve(WORKSPACES_DIR, WORKSPACE_NAME);
@@ -208,6 +210,22 @@ export const CHAT_EMBED_API_BASE_URL = process.env.CHAT_EMBED_API_BASE_URL ?? ME
 export const CHAT_TOP_K = parseInt(process.env.CHAT_TOP_K ?? "20", 10);
 export const CHAT_MIN_SCORE = parseFloat(process.env.CHAT_MIN_SCORE ?? "0.3");
 export const CHAT_DEEP_SEARCH = (process.env.CHAT_DEEP_SEARCH ?? "false") === "true";
+
+// Focus: load all chunks from selected categories (token budget)
+export const CHAT_FOCUS_MAX_TOKENS = parseInt(process.env.CHAT_FOCUS_MAX_TOKENS ?? "150000", 10);
+
+// ── Chat — Compaction (session history summarization) ─────────────
+// These control WHEN and HOW the current session's message history is
+// summarized to keep LLM context calls bounded. They do NOT affect:
+//   - Memories (cross-session facts, controlled via Settings UI)
+//   - Semantic history search (always on, no config)
+
+// Trigger compaction when total session history exceeds this threshold.
+export const CHAT_COMPACTION_THRESHOLD_TOKENS = parseInt(process.env.CHAT_COMPACTION_THRESHOLD_TOKENS ?? "20000", 10);
+// Keep this many tokens of the most recent messages verbatim (not summarized).
+export const CHAT_COMPACTION_WINDOW_TOKENS = parseInt(process.env.CHAT_COMPACTION_WINDOW_TOKENS ?? "8000", 10);
+// Maximum length of the compaction summary output.
+export const CHAT_COMPACTION_SUMMARY_TOKENS = parseInt(process.env.CHAT_COMPACTION_SUMMARY_TOKENS ?? "2000", 10);
 
 // ── Projects (Claude Projects export) ───────────────────────────────
 export const BUNDLES_FILE = resolvePath(process.env.BUNDLES_FILE ?? join(BUNDLES_DIR, "bundles.json"));

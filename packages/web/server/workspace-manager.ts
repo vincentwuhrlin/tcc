@@ -6,18 +6,20 @@
  *   2. Point DB to new workspace path
  *   3. Reload instructions.md + domain.md + PLAN.md headers
  *   4. Reload RAG index from new workspace.db
- *   5. Persist selection in .tcc-state.json
+ *   5. Warm up the embedding model (avoid first-request stall)
  *   6. Return updated workspace info + stats
+ *
+ * Active workspace persistence is handled client-side via localStorage.
  */
 import { readFileSync, existsSync, readdirSync, openSync, readSync, closeSync } from "fs";
 import { join, resolve } from "path";
 import { MONOREPO_ROOT } from "./env.js";
 import { resetDb, getDb, getDbStats } from "@tcc/core/src/common/db.js";
-import { clearIndex, loadIndex } from "@tcc/core/src/common/rag.js";
+import { clearIndex, loadIndex, buildCategoryIndex } from "@tcc/core/src/common/rag.js";
+import { clearMessageIndex, loadMessageIndex, messageIndexSize } from "@tcc/core/src/common/history.js";
 import { getChatEmbedEngine } from "@tcc/core/src/common/embed/index.js";
 import { CHAT_MIN_SCORE, CHAT_TOP_K } from "@tcc/core/src/config.js";
 import { loadWorkspace, scanAllWorkspaces, type WorkspaceInfo } from "./workspace.js";
-import { getActiveWorkspaceName, setActiveWorkspace } from "./state.js";
 import { COMPACT_THRESHOLD, SLIDING_WINDOW_SIZE, COMPACT_INTERVAL } from "./sessions.js";
 
 // ── Mutable state ───────────────────────────────────────────────────
@@ -58,6 +60,7 @@ export function domainContent(): string { return _domainContent; }
 export function planHeaders(): string { return _planHeaders; }
 export function ragReady(): boolean { return _ragReady; }
 export function ragChunkCount(): number { return _ragChunkCount; }
+export function messageIndexCount(): number { return messageIndexSize(); }
 export function workspaceStats(): CachedWorkspaceStats | null { return _cachedStats; }
 
 /** Reload RAG index from DB (call after inserting new embeddings). */
@@ -284,9 +287,11 @@ async function computeWorkspaceStats(): Promise<CachedWorkspaceStats> {
 // ── Load RAG index ──────────────────────────────────────────────────
 
 async function loadRagIndex(): Promise<void> {
+  let engine: Awaited<ReturnType<typeof getChatEmbedEngine>> | null = null;
+
   try {
     clearIndex();
-    const engine = await getChatEmbedEngine();
+    engine = await getChatEmbedEngine();
     const info = engine.info();
     _ragChunkCount = loadIndex(info.model);
     _ragReady = _ragChunkCount > 0;
@@ -295,6 +300,43 @@ async function loadRagIndex(): Promise<void> {
     _ragReady = false;
     _ragChunkCount = 0;
     console.error(`  ❌ RAG init failed: ${err instanceof Error ? err.message : err}`);
+    return;
+  }
+
+  // Build category index from chunk frontmatters (for Focus mode)
+  // Failure here is non-fatal — Focus pills will simply not appear.
+  try {
+    const outputDir = join(_current.path, "media", "output");
+    const catStats = buildCategoryIndex(outputDir);
+    console.log(`  🏷️  Category index: ${catStats.categories} categories, ${catStats.chunks} chunks mapped`);
+  } catch (err) {
+    console.error(`  ⚠️  Category index failed (Focus disabled): ${err instanceof Error ? err.message : err}`);
+  }
+
+  // Load message embeddings index from DB (for semantic history search)
+  // Failure is non-fatal — search will return empty results.
+  try {
+    clearMessageIndex();
+    if (engine) {
+      const info = engine.info();
+      const msgCount = loadMessageIndex(info.model);
+      console.log(`  💬 Message index: ${msgCount} messages indexed (history search)`);
+    }
+  } catch (err) {
+    console.error(`  ⚠️  Message index failed: ${err instanceof Error ? err.message : err}`);
+  }
+
+  // Warm up the embedding model — first call downloads and loads the model.
+  // Without this, the first user query triggers a multi-second download
+  // which causes tsx watch to restart the server mid-request.
+  if (engine) {
+    try {
+      const tw = Date.now();
+      await engine.embedQuery("warmup");
+      console.log(`  🔥 Embed model warmed up in ${Date.now() - tw}ms`);
+    } catch (err) {
+      console.error(`  ⚠️  Embed warmup failed: ${err instanceof Error ? err.message : err}`);
+    }
   }
 }
 
@@ -306,8 +348,8 @@ export async function init(): Promise<void> {
   // Scan all available workspaces
   _allWorkspaces = scanAllWorkspaces();
 
-  // Determine active workspace: .tcc-state.json → .env → "default"
-  const activeName = getActiveWorkspaceName();
+  // Determine active workspace from .env (frontend handles persistence via localStorage)
+  const activeName = process.env.WORKSPACE ?? _allWorkspaces[0]?.name ?? "default";
   const wsPath = resolveWorkspacePath(activeName);
 
   // Load workspace info
@@ -361,9 +403,6 @@ export async function switchWorkspace(workspaceId: string): Promise<WorkspaceInf
 
   // Reload RAG index
   await loadRagIndex();
-
-  // Persist selection
-  setActiveWorkspace(workspaceId);
 
   // Recompute cached stats
   _cachedStats = await computeWorkspaceStats();

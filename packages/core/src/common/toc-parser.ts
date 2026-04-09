@@ -18,7 +18,7 @@ export interface TocEntry {
   title: string;      // cleaned title
   page: number | null;
   depth: number;      // number of parts in section: "2.3.1" → 3
-  path: string;       // breadcrumb: "IEM / Setup / IEM Virtual"
+  path?: string;      // breadcrumb: "IEM / Setup / IEM Virtual" — populated by buildHierarchy()
 }
 
 export interface ExtractedHeading {
@@ -374,7 +374,7 @@ async function extractWithLlm(tocRawLines: string[]): Promise<TocEntry[]> {
   const userMessage = `Parse this Table of Contents:\n\n${tocText}`;
 
   try {
-    const response = await llmCall(TOC_LLM_SYSTEM, userMessage, 8192);
+    const { text: response } = await llmCall(TOC_LLM_SYSTEM, userMessage, 8192, undefined, { sessionId: null, kind: "toc_parse" });
     const cleaned = response.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned) as Array<{ section: string; title: string; page?: number }>;
 

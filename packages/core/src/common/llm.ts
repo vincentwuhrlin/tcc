@@ -1,3 +1,4 @@
+
 /**
  * LLM wrapper — supports streaming (Vercel AI SDK) and batch (Anthropic Batch API).
  *
@@ -22,6 +23,7 @@ import {
   CHAT_API_PROVIDER, CHAT_API_KEY, CHAT_API_MODEL, CHAT_API_BASE_URL,
   type ApiProvider,
 } from "../config.js";
+import { recordUsage } from "./db.js";
 
 // ── LLM Config ──────────────────────────────────────────────────────
 
@@ -30,6 +32,27 @@ export interface LlmConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+}
+
+/** Token usage returned by every LLM call. Always includes provider + model
+ *  so callers can record accurate stats even when config is mixed per call. */
+export interface LlmUsage {
+  inputTokens: number;
+  outputTokens: number;
+  provider: ApiProvider;
+  baseUrl: string;
+  model: string;
+}
+
+export interface LlmResult {
+  text: string;
+  usage: LlmUsage;
+}
+
+export interface LlmStreamResult {
+  textStream: AsyncIterable<string>;
+  /** Resolves after the stream finishes with final token counts. */
+  usage: Promise<LlmUsage>;
 }
 
 /** Default config for media pipeline commands. */
@@ -85,37 +108,72 @@ function getProvider(config?: LlmConfig) {
 
 // ── Streaming call (one at a time) ──────────────────────────────────
 
-/** Call the LLM with a system prompt and user message. Returns the text response. */
+/** Tracking info for automatic usage recording. If omitted, no DB record is written. */
+export interface LlmTracking {
+  sessionId: string | null;
+  kind: string;
+}
+
+/** Call the LLM with a system prompt and user message.
+ *  Returns the text response AND token usage.
+ *  If `tracking` is provided, a row is automatically inserted into token_usage. */
 export async function llmCall(
   systemPrompt: string,
   userMessage: string,
   maxTokens: number = 4096,
   config?: LlmConfig,
-): Promise<string> {
+  tracking?: LlmTracking,
+): Promise<LlmResult> {
   const cfg = config ?? getDefaultLlmConfig();
   const provider = getProvider(cfg);
   const model = provider(cfg.model);
 
-  const { text } = await generateText({
+  const { text, usage } = await generateText({
     model,
     system: systemPrompt,
     prompt: userMessage,
     maxTokens,
   });
 
-  return text.trim();
+  const shaped: LlmUsage = {
+    inputTokens: usage?.promptTokens ?? 0,
+    outputTokens: usage?.completionTokens ?? 0,
+    provider: cfg.provider,
+    baseUrl: cfg.baseUrl,
+    model: cfg.model,
+  };
+
+  if (tracking) {
+    try {
+      recordUsage({
+        sessionId: tracking.sessionId,
+        kind: tracking.kind,
+        provider: shaped.provider,
+        baseUrl: shaped.baseUrl || null,
+        model: shaped.model,
+        inputTokens: shaped.inputTokens,
+        outputTokens: shaped.outputTokens,
+      });
+    } catch (err) {
+      console.error(`⚠️  recordUsage failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  return { text: text.trim(), usage: shaped };
 }
 
 /**
  * Stream LLM response as an async iterable of text chunks.
- * Each yielded string is a partial token/word from the model.
+ * Also exposes a Promise that resolves with final token usage after the stream ends.
+ * If `tracking` is provided, a row is automatically inserted when usage resolves.
  */
 export function llmStreamCall(
   systemPrompt: string,
   userMessage: string,
   maxTokens: number = 4096,
   config?: LlmConfig,
-): { textStream: AsyncIterable<string> } {
+  tracking?: LlmTracking,
+): LlmStreamResult {
   const cfg = config ?? getDefaultLlmConfig();
   const provider = getProvider(cfg);
   const model = provider(cfg.model);
@@ -127,7 +185,40 @@ export function llmStreamCall(
     maxTokens,
   });
 
-  return { textStream: result.textStream };
+  // Transform the Vercel AI SDK usage Promise into our shape and record it
+  const usage: Promise<LlmUsage> = result.usage.then((u) => {
+    const shaped: LlmUsage = {
+      inputTokens: u?.promptTokens ?? 0,
+      outputTokens: u?.completionTokens ?? 0,
+      provider: cfg.provider,
+      baseUrl: cfg.baseUrl,
+      model: cfg.model,
+    };
+    if (tracking) {
+      try {
+        recordUsage({
+          sessionId: tracking.sessionId,
+          kind: tracking.kind,
+          provider: shaped.provider,
+          baseUrl: shaped.baseUrl || null,
+          model: shaped.model,
+          inputTokens: shaped.inputTokens,
+          outputTokens: shaped.outputTokens,
+        });
+      } catch (err) {
+        console.error(`⚠️  recordUsage failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    return shaped;
+  }).catch(() => ({
+    inputTokens: 0,
+    outputTokens: 0,
+    provider: cfg.provider,
+    baseUrl: cfg.baseUrl,
+    model: cfg.model,
+  }));
+
+  return { textStream: result.textStream, usage };
 }
 
 // ── Batch API (Anthropic only, -50% cost) ───────────────────────────
