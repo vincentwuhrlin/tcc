@@ -146,6 +146,12 @@ Trois engines sont supportés (factory dans `packages/core/src/common/embed/`) :
 
 Le DTYPE (`fp16`, `int8`, …) est stocké dans le nom du modèle en DB pour que plusieurs quantizations puissent coexister. Les vecteurs atterrissent dans `workspace.db` (SQLite + WAL).
 
+> **Astuce Windows — empêcher la mise en veille pendant les longs runs.** L'embedding (et dans une moindre mesure `classify`) peut prendre plusieurs heures sur un gros workspace. Si la machine s'endort ou que l'économiseur d'écran se déclenche, le run peut se figer. Depuis un terminal PowerShell séparé, lancez :
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File tools/keep-awake.ps1
+> ```
+> Le script envoie une touche `F15` (inoffensive) toutes les 60 secondes pour garder la session active. `Ctrl+C` pour stopper.
+
 ---
 
 ### Phase 7 — Chat 🎉
